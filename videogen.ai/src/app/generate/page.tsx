@@ -72,25 +72,36 @@ export default function GenerateVideoPage() {
   };
 
 const handleGenerate = async () => {
-  if (!prompt.trim()) { // Simplified validation
-    setError("Please fill in the prompt.");
+  // Updated validation
+  if (!prompt.trim() || !imageFile || !videoFile) {
+    setError("Please fill in the prompt and upload both a reference image and a video.");
     return;
   }
+  // Clear file-specific errors if general validation passes for these
+  if (fileErrors.image && !imageFile) { /* keep error */ } else if (fileErrors.image) { setFileErrors(prev => ({...prev, image: undefined}));}
+  if (fileErrors.video && !videoFile) { /* keep error */ } else if (fileErrors.video) { setFileErrors(prev => ({...prev, video: undefined}));}
+
 
   setIsLoading(true);
   setError(null);
-  setGeneratedVideoUrl(null); // This will now store an image URL
+  setGeneratedVideoUrl(null); 
   setProgress(5);
 
-  const payload = {
-    prompt: prompt,
-    // Example: you might need to pass specific parameters your ComfyUI workflow expects
-    // "width": 512,
-    // "height": 512,
-    // "seed": Math.floor(Math.random() * 1000000), // Example seed
-    // "client_id": "your_client_id_here" // If comfy-pack requires it
-  };
+  const formData = new FormData();
 
+  let finalPrompt = prompt;
+  if (artStyle) {
+    finalPrompt = `Art Style: ${artStyle}. User Prompt: ${prompt}`;
+  }
+  formData.append('Prompt', finalPrompt); // Field name from OpenAPI spec
+
+  if (imageFile) { // Should always be true due to validation
+    formData.append('reference_image', imageFile); // Field name from OpenAPI spec
+  }
+  if (videoFile) { // Should always be true due to validation
+    formData.append('video', videoFile); // Field name from OpenAPI spec
+  }
+  
   let currentProgress = 5;
   const progressInterval = setInterval(() => {
     currentProgress += 5;
@@ -101,14 +112,15 @@ const handleGenerate = async () => {
     }
   }, 300);
 
+
   try {
-    const response = await fetch('/api/comfyui', { // Changed endpoint
+    const response = await fetch('/api/comfyui', {
       method: 'POST',
+      // Content-Type is set automatically by browser for FormData
       headers: {
-        'Content-Type': 'application/json', // Sending JSON
-        'Accept': 'application/octet-stream', // Expecting an image
+        'Accept': 'application/octet-stream', 
       },
-      body: JSON.stringify(payload), // Send JSON payload
+      body: formData,
     });
 
     clearInterval(progressInterval);
@@ -120,41 +132,36 @@ const handleGenerate = async () => {
         try {
           const errorData = await response.json();
           backendError = errorData.message || errorData.error || backendError;
-        } catch (e) {
-          // Stick with statusText if parsing JSON error fails
-        }
+        } catch (e) { /* Stick with statusText */ }
       } else {
         try {
           const textError = await response.text();
           if (textError) backendError = textError;
-        } catch (e) {
-          // Stick with statusText if getting text error fails
-        }
+        } catch (e) { /* Stick with statusText */ }
       }
       throw new Error(backendError);
     }
 
     const responseContentType = response.headers.get('Content-Type');
-    if (responseContentType && (responseContentType.includes('application/octet-stream') || responseContentType.startsWith('image/'))) {
-      const imageBlob = await response.blob();
-      if (imageBlob.size === 0) {
-        throw new Error('Received empty image data from the server.');
+    // Expecting octet-stream for video, but could be image/* as well
+    if (responseContentType && (responseContentType.includes('application/octet-stream') || responseContentType.startsWith('image/') || responseContentType.startsWith('video/'))) {
+      const blobData = await response.blob(); // Use a generic name 'blobData'
+      if (blobData.size === 0) {
+        throw new Error('Received empty data from the server.');
       }
-      setGeneratedVideoUrl(URL.createObjectURL(imageBlob)); // Store object URL for image display
+      setGeneratedVideoUrl(URL.createObjectURL(blobData)); 
       setProgress(100);
     } else {
-      // If the response is OK but not an image stream, it might be an unexpected JSON success message
-      // or some other format. This indicates a mismatch in expectations.
       const unexpectedResponse = await response.text();
       console.error('Unexpected response type:', responseContentType, 'Content:', unexpectedResponse);
-      throw new Error(`Expected an image stream, but received ${responseContentType || 'unknown content type'}.`);
+      throw new Error(`Expected an image/video stream, but received ${responseContentType || 'unknown content type'}.`);
     }
 
   } catch (err: any) {
-    setError(err.message || 'An unexpected error occurred during image generation.');
-    setProgress(0); // Reset progress on error
+    setError(err.message || 'An unexpected error occurred during generation.');
+    setProgress(0);
   } finally {
-    clearInterval(progressInterval); // Ensure interval is always cleared
+    clearInterval(progressInterval);
     setIsLoading(false);
   }
 };
@@ -163,17 +170,17 @@ const handleGenerate = async () => {
     <div className="min-h-screen bg-gray-900 text-white py-12 px-4 sm:px-6 lg:px-8">
       <div className="container mx-auto max-w-3xl">
         <header className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-blue-400">Create Your AI Video</h1>
+          <h1 className="text-4xl font-bold text-blue-400">AI Video/Image Generation</h1>
           <p className="text-xl text-gray-300 mt-2">
-            Bring your ideas to life with our intelligent video generation tool.
+            Upload a reference image and video, then describe your vision to generate new content.
           </p>
         </header>
 
         <section id="upload-section" className="mb-8 p-6 bg-gray-800 rounded-lg shadow-xl">
-          <h2 className="text-2xl font-semibold text-blue-300 mb-4">1. Upload Your Media (Optional)</h2>
+          <h2 className="text-2xl font-semibold text-blue-300 mb-4">1. Upload Your Media</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label htmlFor="image-upload" className="block text-sm font-medium text-gray-300 mb-1">Upload Image</label>
+              <label htmlFor="image-upload" className="block text-sm font-medium text-gray-300 mb-1">Reference Image <span className="text-red-500">*</span></label>
               <input 
                 type="file" 
                 id="image-upload" 
@@ -187,7 +194,7 @@ const handleGenerate = async () => {
               {fileErrors.image && <p className="text-xs text-red-500 mt-1">{fileErrors.image}</p>}
             </div>
             <div>
-              <label htmlFor="video-upload" className="block text-sm font-medium text-gray-300 mb-1">Upload Video</label>
+              <label htmlFor="video-upload" className="block text-sm font-medium text-gray-300 mb-1">Input Video <span className="text-red-500">*</span></label>
               <input 
                 type="file" 
                 id="video-upload" 
@@ -204,9 +211,9 @@ const handleGenerate = async () => {
         </section>
 
         <section id="prompt-section" className="mb-8 p-6 bg-gray-800 rounded-lg shadow-xl">
-          <h2 className="text-2xl font-semibold text-blue-300 mb-4">2. Describe Your Vision</h2>
+          <h2 className="text-2xl font-semibold text-blue-300 mb-4">2. Describe Your Vision (Prompt)</h2>
           <div>
-            <label htmlFor="prompt-input" className="block text-sm font-medium text-gray-300 mb-1">Your Prompt <span className="text-red-500">*</span></label>
+            <label htmlFor="prompt-input" className="block text-sm font-medium text-gray-300 mb-1">User Prompt <span className="text-red-500">*</span></label>
             <textarea 
               id="prompt-input" 
               name="prompt-input" 
@@ -248,16 +255,17 @@ const handleGenerate = async () => {
                 name="target-platform-select" 
                 value={targetPlatform}
                 onChange={(e) => setTargetPlatform(e.target.value)}
-                disabled={isLoading}
+                disabled={true}
                 className="block w-full pl-3 pr-10 py-2 text-base border-gray-700 bg-gray-700 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md text-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <option value="">Select Target Platform...</option>
-                <option value="youtube_16_9">YouTube (16:9)</option>
+                <option value="">Not Applicable</option>
+                {/* <option value="youtube_16_9">YouTube (16:9)</option>
                 <option value="tiktok_9_16">TikTok (9:16)</option>
                 <option value="instagram_1_1">Instagram Post (1:1)</option>
                 <option value="instagram_9_16">Instagram Story (9:16)</option>
-                <option value="linkedin">LinkedIn Feed</option>
+                <option value="linkedin">LinkedIn Feed</option> */}
               </select>
+              <p className="text-xs text-gray-500 mt-1">Target Platform selection is currently disabled.</p>
             </div>
           </div>
         </section>
@@ -266,10 +274,10 @@ const handleGenerate = async () => {
           <button
             type="button"
             onClick={handleGenerate}
-            disabled={isLoading || !prompt.trim()}
+            disabled={isLoading || !prompt.trim() || !imageFile || !videoFile || !!fileErrors.image || !!fileErrors.video}
             className="w-full md:w-auto inline-flex justify-center items-center px-8 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isLoading ? `Generating... (${progress}%)` : 'Generate Video'}
+            {isLoading ? `Generating... (${progress}%)` : 'Generate Content'}
           </button>
         </section>
         
@@ -281,7 +289,7 @@ const handleGenerate = async () => {
 
         {isLoading && (
           <section id="progress-section" className="mb-8 p-6 bg-gray-800 rounded-lg shadow-xl">
-            <h2 className="text-xl font-semibold text-blue-300 mb-4 text-center">Generating your video...</h2>
+            <h2 className="text-xl font-semibold text-blue-300 mb-4 text-center">Generating your content...</h2>
             <div className="w-full bg-gray-700 rounded-full h-4">
               <div 
                 className="bg-blue-600 h-4 rounded-full transition-all duration-300 ease-linear" 
@@ -293,22 +301,22 @@ const handleGenerate = async () => {
         )}
 
         {generatedVideoUrl && !isLoading && (
-          <section id="image-preview-section" className="mb-8 p-6 bg-gray-800 rounded-lg shadow-xl"> {/* id updated for clarity */}
-            <h2 className="text-2xl font-semibold text-blue-300 mb-4 text-center">Your Image is Ready!</h2>
-            <div className="bg-black rounded-md overflow-hidden flex justify-center items-center"> {/* Adjusted div for image centering if needed */}
+          <section id="image-preview-section" className="mb-8 p-6 bg-gray-800 rounded-lg shadow-xl"> 
+            <h2 className="text-2xl font-semibold text-blue-300 mb-4 text-center">Your Generated Content is Ready!</h2>
+            <div className="bg-black rounded-md overflow-hidden flex justify-center items-center"> 
               <img 
                 src={generatedVideoUrl} 
-                alt="Generated Image" 
-                className="max-w-full max-h-[70vh] object-contain" // Adjusted styling for typical image display
+                alt="Generated Output" // Changed alt text
+                className="max-w-full max-h-[70vh] object-contain" 
               />
             </div>
             <div className="text-center mt-6">
               <a
                 href={generatedVideoUrl}
-                download="generated_image.png" // Changed download filename
+                download="generated_content.out" // Changed download filename to be generic
                 className="inline-flex items-center px-6 py-2 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-gray-800"
               >
-                Download Image 
+                Download Output
               </a>
             </div>
           </section>
