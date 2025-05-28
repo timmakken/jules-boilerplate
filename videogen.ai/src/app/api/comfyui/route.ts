@@ -31,6 +31,7 @@ export async function POST(request: NextRequest) {
         // e.g., 'Authorization' if that was a requirement. For now, keeping it simple.
       },
       body: request.body, // Pass the readable stream directly
+      duplex: 'half', // Add this line
       // For Node.js versions < 18, you might need `duplex: 'half'` here if using streams.
       // Next.js 13+ edge runtime supports this, serverless functions might vary.
       // If request.body passthrough causes issues, an alternative is:
