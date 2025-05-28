@@ -71,77 +71,93 @@ export default function GenerateVideoPage() {
     }
   };
 
-  const handleGenerate = async () => {
-    // Basic client-side validation
-    if (!prompt.trim() || !artStyle || !targetPlatform) {
-      setError("Please fill in the prompt, art style, and target platform.");
-      return;
-    }
+const handleGenerate = async () => {
+  if (!prompt.trim()) { // Simplified validation
+    setError("Please fill in the prompt.");
+    return;
+  }
 
-    setIsLoading(true);
-    setError(null);
-    setGeneratedVideoUrl(null);
-    setProgress(5); // Initial progress
+  setIsLoading(true);
+  setError(null);
+  setGeneratedVideoUrl(null); // This will now store an image URL
+  setProgress(5);
 
-    const formData = new FormData();
-    formData.append('prompt', prompt);
-    formData.append('artStyle', artStyle);
-    formData.append('targetPlatform', targetPlatform);
-
-    if (imageFile) {
-      formData.append('image', imageFile);
-    }
-    if (videoFile) {
-      formData.append('video', videoFile);
-    }
-
-    let currentProgress = 5;
-    const progressInterval = setInterval(() => {
-      currentProgress += 5;
-      if (currentProgress <= 95) { 
-        setProgress(currentProgress);
-      } else {
-        clearInterval(progressInterval); 
-      }
-    }, 300); // Adjusted timing for smoother simulation
-
-
-    try {
-      const response = await fetch('http://localhost:3001/api/generate-video', {
-        method: 'POST',
-        body: formData,
-      });
-
-      clearInterval(progressInterval); 
-
-      if (!response.ok) {
-        let backendError = `Error: ${response.status} ${response.statusText}`;
-        try {
-            const errorData = await response.json();
-            backendError = errorData.message || errorData.error || backendError;
-        } catch (e) {
-            // Stick with statusText
-        }
-        throw new Error(backendError);
-      }
-
-      const result = await response.json();
-
-      if (result.videoUrl) {
-        setGeneratedVideoUrl(result.videoUrl);
-        setProgress(100); 
-      } else {
-        throw new Error('Video URL not found in response.');
-      }
-
-    } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred during video generation.');
-      setProgress(0); 
-    } finally {
-      clearInterval(progressInterval); 
-      setIsLoading(false);
-    }
+  const payload = {
+    prompt: prompt,
+    // Example: you might need to pass specific parameters your ComfyUI workflow expects
+    // "width": 512,
+    // "height": 512,
+    // "seed": Math.floor(Math.random() * 1000000), // Example seed
+    // "client_id": "your_client_id_here" // If comfy-pack requires it
   };
+
+  let currentProgress = 5;
+  const progressInterval = setInterval(() => {
+    currentProgress += 5;
+    if (currentProgress <= 95) {
+      setProgress(currentProgress);
+    } else {
+      clearInterval(progressInterval);
+    }
+  }, 300);
+
+  try {
+    const response = await fetch('/api/comfyui', { // Changed endpoint
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json', // Sending JSON
+        'Accept': 'application/octet-stream', // Expecting an image
+      },
+      body: JSON.stringify(payload), // Send JSON payload
+    });
+
+    clearInterval(progressInterval);
+
+    if (!response.ok) {
+      let backendError = `Error: ${response.status} ${response.statusText}`;
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.indexOf("application/json") !== -1) {
+        try {
+          const errorData = await response.json();
+          backendError = errorData.message || errorData.error || backendError;
+        } catch (e) {
+          // Stick with statusText if parsing JSON error fails
+        }
+      } else {
+        try {
+          const textError = await response.text();
+          if (textError) backendError = textError;
+        } catch (e) {
+          // Stick with statusText if getting text error fails
+        }
+      }
+      throw new Error(backendError);
+    }
+
+    const responseContentType = response.headers.get('Content-Type');
+    if (responseContentType && (responseContentType.includes('application/octet-stream') || responseContentType.startsWith('image/'))) {
+      const imageBlob = await response.blob();
+      if (imageBlob.size === 0) {
+        throw new Error('Received empty image data from the server.');
+      }
+      setGeneratedVideoUrl(URL.createObjectURL(imageBlob)); // Store object URL for image display
+      setProgress(100);
+    } else {
+      // If the response is OK but not an image stream, it might be an unexpected JSON success message
+      // or some other format. This indicates a mismatch in expectations.
+      const unexpectedResponse = await response.text();
+      console.error('Unexpected response type:', responseContentType, 'Content:', unexpectedResponse);
+      throw new Error(`Expected an image stream, but received ${responseContentType || 'unknown content type'}.`);
+    }
+
+  } catch (err: any) {
+    setError(err.message || 'An unexpected error occurred during image generation.');
+    setProgress(0); // Reset progress on error
+  } finally {
+    clearInterval(progressInterval); // Ensure interval is always cleared
+    setIsLoading(false);
+  }
+};
 
   return (
     <div className="min-h-screen bg-gray-900 text-white py-12 px-4 sm:px-6 lg:px-8">
@@ -250,7 +266,7 @@ export default function GenerateVideoPage() {
           <button
             type="button"
             onClick={handleGenerate}
-            disabled={isLoading || !prompt.trim() || !artStyle || !targetPlatform || !!fileErrors.image || !!fileErrors.video}
+            disabled={isLoading || !prompt.trim()}
             className="w-full md:w-auto inline-flex justify-center items-center px-8 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? `Generating... (${progress}%)` : 'Generate Video'}
@@ -277,18 +293,22 @@ export default function GenerateVideoPage() {
         )}
 
         {generatedVideoUrl && !isLoading && (
-          <section id="video-preview-section" className="mb-8 p-6 bg-gray-800 rounded-lg shadow-xl">
-            <h2 className="text-2xl font-semibold text-blue-300 mb-4 text-center">Your Video is Ready!</h2>
-            <div className="aspect-w-16 aspect-h-9 bg-black rounded-md overflow-hidden">
-              <video src={generatedVideoUrl} controls className="w-full h-full object-contain"></video>
+          <section id="image-preview-section" className="mb-8 p-6 bg-gray-800 rounded-lg shadow-xl"> {/* id updated for clarity */}
+            <h2 className="text-2xl font-semibold text-blue-300 mb-4 text-center">Your Image is Ready!</h2>
+            <div className="bg-black rounded-md overflow-hidden flex justify-center items-center"> {/* Adjusted div for image centering if needed */}
+              <img 
+                src={generatedVideoUrl} 
+                alt="Generated Image" 
+                className="max-w-full max-h-[70vh] object-contain" // Adjusted styling for typical image display
+              />
             </div>
             <div className="text-center mt-6">
               <a
                 href={generatedVideoUrl}
-                download="generated_video.mp4"
+                download="generated_image.png" // Changed download filename
                 className="inline-flex items-center px-6 py-2 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-gray-800"
               >
-                Download Video
+                Download Image 
               </a>
             </div>
           </section>
