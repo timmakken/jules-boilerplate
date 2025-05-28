@@ -93,7 +93,7 @@ const handleGenerate = async () => {
   if (artStyle) {
     finalPrompt = `Art Style: ${artStyle}. User Prompt: ${prompt}`;
   }
-  formData.append('Prompt', finalPrompt); // Field name from OpenAPI spec
+  formData.append('Prompt', JSON.stringify(finalPrompt)); // Field name from OpenAPI spec
 
   if (imageFile) { // Should always be true due to validation
     formData.append('reference_image', imageFile); // Field name from OpenAPI spec
