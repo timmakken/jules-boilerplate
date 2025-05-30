@@ -1,36 +1,29 @@
-'use client'; // This component will make client-side requests
+'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation'; // Corrected import for App Router
+// No longer using useRouter from next/navigation for redirecting to login, signIn() handles it.
+import { useSession } from 'next-auth/react'; // Import useSession
 
+// ... (Keep Plan interface)
 interface Plan {
   id: string;
   name: string;
-  price: number; // Assuming price is in cents
+  price: number;
   currency_code: string;
-  // Add other plan properties you want to display, e.g., description, features
-  // For example:
-  // description?: string;
-  // period?: number;
-  // period_unit?: string;
 }
+
 
 export default function PricingPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(true); // Renamed for clarity
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
-  const [mockUser, setMockUser] = useState<any>(null);
+
+  const { data: session, status: authStatus } = useSession(); // Get session data and status
 
   useEffect(() => {
-    // Check for mock user in localStorage
-    const storedUser = localStorage.getItem('mockUser');
-    if (storedUser) {
-      setMockUser(JSON.parse(storedUser));
-    }
-
     async function fetchPlans() {
-      setIsLoading(true);
+      // ... (existing plan fetching logic - no changes needed here)
+      setIsLoadingPlans(true);
       setError(null);
       try {
         const response = await fetch('/api/chargebee/plans');
@@ -38,44 +31,47 @@ export default function PricingPage() {
           throw new Error(`Failed to fetch plans: ${response.statusText}`);
         }
         const data = await response.json();
-        // Assuming the API returns { plans: [...] }
-        // And each plan has at least id, name, price, currency_code
-        // You might need to adjust the mapping based on the actual API response structure
         const fetchedPlans = data.plans.map((p: any) => ({
           id: p.id,
-          name: p.name || p.id.replace(/-/g, ' ').replace(/_/g, ' '), // Basic name formatting if not present
-          price: p.price, // Ensure this is the correct property for price
+          name: p.name || p.id.replace(/-/g, ' ').replace(/_/g, ' '),
+          price: p.price,
           currency_code: p.currency_code,
-          // description: p.description,
-          // period: p.period,
-          // period_unit: p.period_unit,
         }));
         setPlans(fetchedPlans);
       } catch (err) {
         // @ts-ignore
         setError(err.message);
+        // @ts-ignore
         console.error("Error fetching plans:", err);
       } finally {
-        setIsLoading(false);
+        setIsLoadingPlans(false);
       }
     }
     fetchPlans();
   }, []);
 
   const handleSubscribe = async (planId: string) => {
-    if (!mockUser) {
-      setError("Please login to subscribe."); // Or redirect to a login page
+    if (authStatus !== 'authenticated' || !session?.user) {
+      setError("Please login to subscribe.");
+      // Optionally, could call signIn() here to prompt login
+      // signIn();
       return;
     }
-    setIsLoading(true); // To disable button during this async operation
+
+    // Use setIsLoadingPlans or a new state for checkout loading
+    setIsLoadingPlans(true); // Or a new state like setIsLoadingCheckout(true)
     setError(null);
 
     try {
       const body = {
         planId,
-        userId: mockUser.id, // Pass mock user ID
-        userEmail: mockUser.email, // Pass mock user email
+        // Pass user details from the session.
+        // Ensure your session callback in NextAuth options populates these.
+        // @ts-ignore // session.user.id might not be on default User type from next-auth
+        userId: session.user.id,
+        userEmail: session.user.email,
       };
+
       const response = await fetch('/api/chargebee/checkout', {
         method: 'POST',
         headers: {
@@ -91,7 +87,6 @@ export default function PricingPage() {
 
       const data = await response.json();
       if (data.checkoutUrl) {
-        // Redirect to Chargebee's hosted checkout page
         window.location.href = data.checkoutUrl;
       } else {
         throw new Error('Checkout URL not found in response.');
@@ -101,25 +96,26 @@ export default function PricingPage() {
       setError(err.message);
       // @ts-ignore
       console.error("Error creating checkout session:", err.message);
-      // You might want to show a user-friendly error message here
     } finally {
-      setIsLoading(false); // Re-enable button
+      setIsLoadingPlans(false); // Or setIsLoadingCheckout(false)
     }
   };
 
-  if (isLoading && plans.length === 0) { // Keep loading indicator if plans are not yet fetched
+  if (isLoadingPlans || authStatus === 'loading') { // Check auth status loading too
     return (
       <div className="min-h-screen bg-gray-900 text-white flex justify-center items-center">
-        <p className="text-xl">Loading pricing plans...</p>
+        <p className="text-xl">Loading...</p>
       </div>
     );
   }
 
-  if (error) {
+  // ... (Keep existing error display logic)
+  if (error && !isLoadingPlans) { // Only show general error if not actively loading plans (which has its own indicator)
     return (
       <div className="min-h-screen bg-gray-900 text-white flex flex-col justify-center items-center">
         <p className="text-xl text-red-500">Error: {error}</p>
-        <p className="text-gray-400">Could not load pricing plans. Please try again later.</p>
+        {/* Avoid showing "Could not load pricing plans" if plans are actually loaded but another error occurred */}
+        {plans.length === 0 && <p className="text-gray-400">Could not load pricing plans. Please try again later.</p>}
       </div>
     );
   }
@@ -131,8 +127,10 @@ export default function PricingPage() {
         <p className="text-xl text-gray-300 mb-10">
           Choose the perfect plan for your video creation needs.
         </p>
+        {/* Display error related to subscription actions, if any, and not plan loading */}
+        {error && <p className="text-red-500 mb-4">Error: {error}</p>}
 
-        {plans.length === 0 ? (
+        {plans.length === 0 && !isLoadingPlans ? (
           <div className="mt-10 p-6 bg-gray-800 rounded-lg shadow-xl">
             <p className="text-lg text-gray-400">No pricing plans available at the moment. Please check back later.</p>
           </div>
@@ -142,25 +140,20 @@ export default function PricingPage() {
               <div key={plan.id} className="bg-gray-800 rounded-lg shadow-xl p-6 flex flex-col justify-between">
                 <div>
                   <h2 className="text-2xl font-semibold text-blue-300 mb-3">{plan.name}</h2>
-                  {/* Display price - ensure formatting is correct (e.g., cents to dollars) */}
                   <p className="text-3xl font-bold mb-2">
-                    {/* This assumes price is in cents. Adjust if necessary. */}
                     {(plan.price / 100).toLocaleString(undefined, { style: 'currency', currency: plan.currency_code })}
                   </p>
-                  {/* Add more plan details here if available, e.g., plan.description */}
-                  {/* <p className="text-gray-400 mb-4">{plan.description || 'Basic features included.'}</p> */}
-                  {/* <p className="text-gray-400 text-sm mb-4">Billed per {plan.period} {plan.period_unit}(s)</p> */}
                 </div>
                 <button
                   onClick={() => handleSubscribe(plan.id)}
-                  disabled={!mockUser || isLoading} // Disable if not logged in or if another operation is loading
+                  disabled={authStatus !== 'authenticated' || isLoadingPlans}
                   className={`mt-6 font-bold py-3 px-6 rounded-lg transition duration-150 ease-in-out w-full ${
-                    !mockUser || isLoading
+                    authStatus !== 'authenticated' || isLoadingPlans
                       ? 'bg-gray-500 cursor-not-allowed'
                       : 'bg-blue-500 hover:bg-blue-600'
                   } text-white`}
                 >
-                  {mockUser ? 'Subscribe' : 'Login to Subscribe'}
+                  {authStatus === 'authenticated' ? 'Subscribe' : 'Login to Subscribe'}
                 </button>
               </div>
             ))}

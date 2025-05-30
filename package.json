@@ -1,6 +1,10 @@
 {
   "dependencies": {
+    "@auth/prisma-adapter": "^2.9.1",
+    "@prisma/client": "^6.8.2",
     "chargebee-js": "^1.0.5",
-    "chargebee-typescript": "^2.48.0"
+    "chargebee-typescript": "^2.48.0",
+    "next-auth": "^4.24.11",
+    "prisma": "^6.8.2"
   }
 }

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import chargebee from 'chargebee-typescript';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route'; // Adjust path
+import prisma from '@/lib/prisma'; // Import Prisma client
 
 chargebee.configure({
   site: process.env.CHARGEBEE_SITE!,
@@ -7,25 +10,31 @@ chargebee.configure({
 });
 
 export async function POST(request: NextRequest) {
-  try {
-    // In a real app, you'd get the customer_id from the authenticated user's session/database record
-    // This customer_id is Chargebee's ID for the customer, which you should store
-    // when a subscription is successfully created or a customer record is made.
-    const { customerId } = await request.json(); // For now, assume frontend sends this.
+  const session = await getServerSession(authOptions);
 
-    if (!customerId) {
-      return NextResponse.json({ error: 'Customer ID is required to create a portal session.' }, { status: 400 });
+  // @ts-ignore session.user.id should be string (it is, based on callbacks)
+  if (!session || !session.user || !session.user.id || typeof session.user.id !== 'string') {
+    return NextResponse.json({ error: 'Unauthorized or User ID missing/invalid' }, { status: 401 });
+  }
+
+  try {
+    // @ts-ignore session.user.id is known to be a string here
+    const userId: string = session.user.id;
+
+    // Fetch user from DB to get chargebeeCustomerId
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { chargebeeCustomerId: true },
+    });
+
+    if (!user) {
+        return NextResponse.json({ error: 'User not found in database.' }, { status: 404 });
+    }
+    if (!user.chargebeeCustomerId) {
+      return NextResponse.json({ error: 'Chargebee Customer ID not found for this user. Please subscribe to a plan first.' }, { status: 404 });
     }
 
-    // Optional: Define redirect URL after logout from portal or other actions
-    // const portalParams = {
-    //   customer: {
-    //     id: customerId,
-    //   },
-    //   redirect_url: process.env.NEXT_PUBLIC_APP_URL + '/account', // Redirect back to account page
-    //   // forward_url: 'If you want to forward query params from original request to redirect_url'
-    // };
-
+    const customerId = user.chargebeeCustomerId;
     // @ts-ignore
     const result = await chargebee.portal_session.create({ customer: { id: customerId } }).request();
     const portalSession = result.portal_session;

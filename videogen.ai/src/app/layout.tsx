@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar"; // Adjust path if necessary
+import Providers from "./providers"; // Import the new Providers component
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -17,10 +18,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.className} bg-gray-900`}> {/* Added bg-gray-900 for consistent background */}
-        <Navbar />
-        <main>{children}</main>
-        {/* You might want to add a Footer component here later */}
+      <body className={`${inter.className} bg-gray-900`}>
+        <Providers> {/* Wrap Navbar and children with Providers */}
+          <Navbar />
+          <main>{children}</main>
+          {/* You might want to add a Footer component here later */}
+        </Providers>
       </body>
     </html>
   );
