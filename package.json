@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "chargebee-js": "^1.0.5",
+    "chargebee-typescript": "^2.48.0"
+  }
+}
