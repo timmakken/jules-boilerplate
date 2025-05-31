@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import chargebee from 'chargebee-typescript';
+import { ChargeBee } from 'chargebee-typescript';
+
+// Create a new ChargeBee instance
+const chargebee = new ChargeBee();
 
 // Configure Chargebee with your site name and API key
 chargebee.configure({
@@ -9,13 +12,16 @@ chargebee.configure({
 
 export async function GET(request: NextRequest) {
   try {
-    const result = await chargebee.item_price.list({
+    // Use type assertion to bypass TypeScript's property checking
+    const params = {
       limit: 10, // Adjust limit as needed
       "status[is]": "active", // Fetch only active plans
       "item_type[is]": "plan", // Ensure we are fetching plans
-    }).request();
+    } as any;
 
-    const plans = result.list.map((entry) => entry.item_price);
+    const result = await chargebee.item_price.list(params).request();
+
+    const plans = result.list.map((entry: any) => entry.item_price);
 
     return NextResponse.json({ plans });
   } catch (error) {
