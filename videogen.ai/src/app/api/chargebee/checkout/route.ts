@@ -1,49 +1,52 @@
 import { NextRequest, NextResponse } from 'next/server';
 import chargebee from 'chargebee-typescript';
+import { getServerSession } from 'next-auth/next'; // Import getServerSession
+import { authOptions } from '@/app/api/auth/[...nextauth]/route'; // Adjust path as needed
 
-// Configure Chargebee with your site name and API key
 chargebee.configure({
   site: process.env.CHARGEBEE_SITE!,
   api_key: process.env.CHARGEBEE_API_KEY!,
 });
 
 export async function POST(request: NextRequest) {
+  const session = await getServerSession(authOptions);
+
+  if (!session || !session.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
-    // Assuming the frontend will pass userId and userEmail if the user is authenticated
-    const { planId, userId, userEmail } = await request.json();
+    const { planId } = await request.json(); // userId and userEmail will come from session
 
     if (!planId) {
       return NextResponse.json({ error: 'Plan ID is required' }, { status: 400 });
     }
 
-    let customerInfo = {};
-    if (userId && userEmail) {
-      customerInfo = {
-        customer: {
-          id: userId, // User ID from your application's database
-          email: userEmail, // User's email
-          // You can add first_name, last_name etc. if available
-        },
-      };
-    } else {
-      // Handle cases where user is not fully identified, or it's an anonymous checkout.
-      // Chargebee might create a guest customer or you might require login first.
-      // For this example, we'll proceed without customer ID if not provided,
-      // but in a real app, you'd likely enforce login or have a clear strategy.
-      console.log("Proceeding with checkout without pre-filled customer ID/email. User might need to enter email on Chargebee's page.");
+    // @ts-ignore session.user.id might not be on default User type. It's added via callbacks.
+    const userId = session.user.id as string;
+    const userEmail = session.user.email as string;
+
+    if (!userId || !userEmail) {
+      return NextResponse.json({ error: 'User ID or Email missing in session' }, { status: 400 });
     }
 
+    let customerInfo = {
+      customer: {
+        id: userId,
+        email: userEmail,
+        // Consider adding first_name, last_name if available in your User model and session
+        // name: session.user.name || '',
+      },
+    };
+
     const hostedPageParams = {
-      ...customerInfo, // Spread the customer object here
+      ...customerInfo,
       subscription_items: [
-        {
-          item_price_id: planId,
-        },
+        { item_price_id: planId },
       ],
       // redirect_url: `${process.env.NEXT_PUBLIC_APP_URL}/payment-success?session_id={hosted_page.id}`,
       // cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/pricing`,
     };
-
     // @ts-ignore
     const result = await chargebee.hosted_page.checkout_new_for_items(hostedPageParams).request();
     const hostedPage = result.hosted_page;

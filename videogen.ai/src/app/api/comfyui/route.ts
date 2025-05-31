@@ -1,18 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jobStore } from './jobStore';
 import { watchForOutputFiles } from './fileWatcher';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route'; // Adjust path
 
 // Set a shorter timeout for the ComfyUI request (5 minutes in milliseconds)
 // We don't need a long timeout since we're using the file watcher as the primary mechanism
 const COMFY_UI_TIMEOUT = 5 * 60 * 1000;
 
 export async function POST(request: NextRequest) {
+  // Check authentication first
+  const session = await getServerSession(authOptions);
+
+  if (!session || !session.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // If authorized, proceed with ComfyUI logic
+  // @ts-ignore User ID is present on session due to callbacks
+  console.log("User authorized for ComfyUI POST:", session.user.id);
+
   // Create a new job
   const job = jobStore.createJob();
+  
   try {
-    // The incoming request body is already a ReadableStream of FormData.
-    // We will pass it directly to the fetch call to ComfyUI.
-
     const comfyUIApiUrl = process.env.COMFYUI_API_URL || 'http://127.0.0.1:3107/generate';
 
     // Determine Accept header for ComfyUI request based on frontend's Accept header
@@ -24,7 +35,7 @@ export async function POST(request: NextRequest) {
         (clientAcceptHeader.includes('application/octet-stream') || 
          clientAcceptHeader.includes('image/*') || 
          clientAcceptHeader.includes('video/*'))) {
-      acceptHeader = clientAcceptHeader; // Or be more specific if needed
+      acceptHeader = clientAcceptHeader;
     }
     
     // Instead of waiting for the ComfyUI response, we'll process it asynchronously
@@ -252,4 +263,16 @@ async function processComfyUIRequest(
       error: `Fetch request failed: ${errorMessage}. Waiting for output files.`
     });
   }
+}
+
+// If you have other methods like GET, protect them similarly:
+export async function GET(request: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session || !session.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  
+  // ... Your GET logic
+  // @ts-ignore User ID is present on session due to callbacks
+  return NextResponse.json({ data: "Sensitive ComfyUI GET data for user " + session.user.id });
 }
