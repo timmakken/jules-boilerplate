@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, ChangeEvent, FormEvent } from 'react'; // Added FormEvent
+import React, { useState, ChangeEvent, FormEvent, useEffect } from 'react'; // Added React and useEffect
 
 // Define allowed file types and sizes
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif'];
@@ -24,6 +24,7 @@ export default function GenerateVideoPage() {
   const [error, setError] = useState<string | null>(null);
   const [fileErrors, setFileErrors] = useState<FileErrors>({});
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
+  const [contentType, setContentType] = useState<string | null>(null);
   const [progress, setProgress] = useState<number>(0); // Example: 0-100
 
   const handleImageChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -71,6 +72,15 @@ export default function GenerateVideoPage() {
     }
   };
 
+// Add a state for the job ID
+const [jobId, setJobId] = useState<string | null>(null);
+// Add a state for polling interval
+const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+// Add states for retry logic
+const [retryCount, setRetryCount] = useState<number>(0);
+const [lastRetryTime, setLastRetryTime] = useState<number>(0);
+const [isManualRefreshAvailable, setIsManualRefreshAvailable] = useState<boolean>(false);
+
 const handleGenerate = async () => {
   // Updated validation
   if (!prompt.trim() || !imageFile || !videoFile) {
@@ -81,11 +91,18 @@ const handleGenerate = async () => {
   if (fileErrors.image && !imageFile) { /* keep error */ } else if (fileErrors.image) { setFileErrors(prev => ({...prev, image: undefined}));}
   if (fileErrors.video && !videoFile) { /* keep error */ } else if (fileErrors.video) { setFileErrors(prev => ({...prev, video: undefined}));}
 
-
+  // Reset states
   setIsLoading(true);
   setError(null);
   setGeneratedVideoUrl(null); 
   setProgress(5);
+  setJobId(null);
+  
+  // Clear any existing polling interval
+  if (pollingInterval) {
+    clearInterval(pollingInterval);
+    setPollingInterval(null);
+  }
 
   const formData = new FormData();
 
@@ -93,7 +110,7 @@ const handleGenerate = async () => {
   if (artStyle) {
     finalPrompt = `Art Style: ${artStyle}. User Prompt: ${prompt}`;
   }
-  formData.append('Prompt', JSON.stringify(finalPrompt)); // Field name from OpenAPI spec
+  formData.append('Prompt', finalPrompt); // Field name from OpenAPI spec - send as plain string, not JSON
 
   if (imageFile) { // Should always be true due to validation
     formData.append('reference_image', imageFile); // Field name from OpenAPI spec
@@ -102,32 +119,37 @@ const handleGenerate = async () => {
     formData.append('video', videoFile); // Field name from OpenAPI spec
   }
   
+  // Set up a progress indicator for the async process
   let currentProgress = 5;
   const progressInterval = setInterval(() => {
-    currentProgress += 5;
+    // Slower increment for longer processes
+    const increment = currentProgress < 50 ? 1 : 0.2; // Slow down as we progress
+    currentProgress += increment;
+    
+    // Cap at 95% until we get actual completion
     if (currentProgress <= 95) {
-      setProgress(currentProgress);
+      setProgress(Math.min(Math.round(currentProgress), 95));
     } else {
       clearInterval(progressInterval);
     }
-  }, 300);
-
+  }, 5000); // Update every 5 seconds
 
   try {
+    // Step 1: Submit the job and get a job ID
     const response = await fetch('/api/comfyui', {
       method: 'POST',
       // Content-Type is set automatically by browser for FormData
       headers: {
-        'Accept': 'application/octet-stream', 
+        'Accept': 'application/json', // We expect a JSON response with job ID
       },
       body: formData,
     });
 
-    clearInterval(progressInterval);
-
     if (!response.ok) {
+      clearInterval(progressInterval);
       let backendError = `Error: ${response.status} ${response.statusText}`;
       const contentType = response.headers.get("content-type");
+      
       if (contentType && contentType.indexOf("application/json") !== -1) {
         try {
           const errorData = await response.json();
@@ -142,29 +164,241 @@ const handleGenerate = async () => {
       throw new Error(backendError);
     }
 
-    const responseContentType = response.headers.get('Content-Type');
-    // Expecting octet-stream for video, but could be image/* as well
-    if (responseContentType && (responseContentType.includes('application/octet-stream') || responseContentType.startsWith('image/') || responseContentType.startsWith('video/'))) {
-      const blobData = await response.blob(); // Use a generic name 'blobData'
-      if (blobData.size === 0) {
-        throw new Error('Received empty data from the server.');
-      }
-      setGeneratedVideoUrl(URL.createObjectURL(blobData)); 
-      setProgress(100);
-    } else {
-      const unexpectedResponse = await response.text();
-      console.error('Unexpected response type:', responseContentType, 'Content:', unexpectedResponse);
-      throw new Error(`Expected an image/video stream, but received ${responseContentType || 'unknown content type'}.`);
+    // Parse the response to get the job ID
+    const jobData = await response.json();
+    const newJobId = jobData.jobId;
+    
+    if (!newJobId) {
+      clearInterval(progressInterval);
+      throw new Error('No job ID returned from the server.');
     }
+    
+    setJobId(newJobId);
+    console.log(`Job submitted with ID: ${newJobId}`);
+    
+    // Step 2: Start polling for job status
+    const statusInterval = setInterval(async () => {
+      try {
+        await checkJobStatus(newJobId);
+  } catch (error) {
+    console.error('Error checking job status:', error);
+    
+    // Check if it's an AbortError (timeout)
+    if (error instanceof Error) {
+      console.log(`Error type: ${error.name}`);
+      
+      if (error.name === 'AbortError') {
+        console.log('Status check timed out');
+        
+        // Increment retry count
+        const newRetryCount = retryCount + 1;
+        setRetryCount(newRetryCount);
+        
+        // Calculate backoff time (exponential with max cap)
+        const backoffTime = Math.min(5000 * Math.pow(2, newRetryCount), 60000);
+        console.log(`Will retry in ${backoffTime/1000} seconds`);
+        
+        // Record the retry time
+        const now = Date.now();
+        setLastRetryTime(now);
+        
+        // After a few retries, show manual refresh option
+        if (newRetryCount >= 3) {
+          setIsManualRefreshAvailable(true);
+        }
+        
+        // Schedule a single retry with backoff
+        setTimeout(() => {
+          // Only proceed if we're still loading and haven't been cancelled
+          if (isLoading && jobId) {
+            checkJobStatus(jobId);
+          }
+        }, backoffTime);
+        
+        // Don't continue with regular polling this time
+        return;
+      }
+    }
+    
+    // For other errors, continue with regular polling
+  }
+    }, 5000); // Check every 5 seconds
+    
+    setPollingInterval(statusInterval);
 
   } catch (err: any) {
-    setError(err.message || 'An unexpected error occurred during generation.');
-    setProgress(0);
-  } finally {
     clearInterval(progressInterval);
+    setError(err.message || 'An unexpected error occurred during job submission.');
+    setProgress(0);
     setIsLoading(false);
   }
 };
+
+// Function to manually refresh the status
+const handleManualRefresh = () => {
+  if (jobId) {
+    // Reset the retry count
+    setRetryCount(0);
+    // Hide the manual refresh button
+    setIsManualRefreshAvailable(false);
+    // Check the status manually
+    checkJobStatus(jobId, true);
+  }
+};
+
+// Function to check job status with improved timeout handling
+const checkJobStatus = async (jobId: string, isManualCheck = false) => {
+  try {
+    // Create an AbortController with a longer timeout (2 minutes)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes
+    
+    console.log(`Checking status for job ${jobId}${isManualCheck ? ' (manual check)' : ''}`);
+    
+    const statusResponse = await fetch(`/api/comfyui/status/${jobId}`, {
+      signal: controller.signal
+    });
+    
+    // Clear the timeout
+    clearTimeout(timeoutId);
+    
+    // Reset retry count on successful fetch
+    if (retryCount > 0) {
+      setRetryCount(0);
+    }
+    
+    // Hide manual refresh button on successful fetch
+    if (isManualRefreshAvailable) {
+      setIsManualRefreshAvailable(false);
+    }
+    
+    if (!statusResponse.ok) {
+      console.error(`Status check failed: ${statusResponse.status} ${statusResponse.statusText}`);
+      
+      // If we get a 500 error, it might be because the job failed or there was an error processing the result
+      if (statusResponse.status === 500) {
+        try {
+          // Try to parse the error response
+          const errorData = await statusResponse.json();
+          console.error('Error data:', errorData);
+          
+          // If this is a job failure (not a server error), stop polling and show the error
+          if (errorData.status === 'failed' || errorData.error) {
+            if (pollingInterval) {
+              clearInterval(pollingInterval);
+              setPollingInterval(null);
+            }
+            setIsLoading(false);
+            setProgress(0);
+            setError(errorData.error || 'The generation process failed.');
+          }
+        } catch (e) {
+          // If we can't parse the error as JSON, just log it and continue polling
+          console.error('Failed to parse error response:', e);
+        }
+      }
+      
+      // For other error codes, continue polling
+      return;
+    }
+    
+    // Check the content type to determine if this is a status update or the final result
+    const responseContentType = statusResponse.headers.get('Content-Type');
+    
+    if (responseContentType && responseContentType.includes('application/json')) {
+      // This is a status update
+      const statusData = await statusResponse.json();
+      console.log('Job status:', statusData);
+      
+      if (statusData.status === 'failed') {
+        // Job failed, stop polling and show error
+        if (pollingInterval) {
+          clearInterval(pollingInterval);
+          setPollingInterval(null);
+        }
+        setIsLoading(false);
+        setProgress(0);
+        setError(statusData.error || 'The generation process failed.');
+      }
+      
+      // If still processing, continue polling
+      return;
+    }
+    
+    // If we get here, the content type is not JSON, which means we have the result
+    const blobData = await statusResponse.blob();
+    
+    if (blobData.size === 0) {
+      console.error('Received empty data from the server.');
+      return; // Continue polling
+    }
+    
+    // We have the result, stop polling
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+      setPollingInterval(null);
+    }
+    
+    // Save the content type and set the result
+    setContentType(responseContentType);
+    setGeneratedVideoUrl(URL.createObjectURL(blobData));
+    setProgress(100);
+    setIsLoading(false);
+    
+    console.log(`Received result with content type: ${responseContentType}`);
+    
+  } catch (error) {
+    console.error('Error checking job status:', error);
+    
+    // Check if it's an AbortError (timeout)
+    if (error instanceof Error) {
+      console.log(`Error type: ${error.name}`);
+      
+      if (error.name === 'AbortError') {
+        console.log('Status check timed out');
+        
+        // Increment retry count
+        const newRetryCount = retryCount + 1;
+        setRetryCount(newRetryCount);
+        
+        // Calculate backoff time (exponential with max cap)
+        const backoffTime = Math.min(5000 * Math.pow(2, newRetryCount), 60000);
+        console.log(`Will retry in ${backoffTime/1000} seconds`);
+        
+        // Record the retry time
+        const now = Date.now();
+        setLastRetryTime(now);
+        
+        // After a few retries, show manual refresh option
+        if (newRetryCount >= 3) {
+          setIsManualRefreshAvailable(true);
+        }
+        
+        // Schedule a single retry with backoff
+        setTimeout(() => {
+          // Only proceed if we're still loading and haven't been cancelled
+          if (isLoading && jobId) {
+            checkJobStatus(jobId);
+          }
+        }, backoffTime);
+        
+        // Don't continue with regular polling this time
+        return;
+      }
+    }
+    
+    // For other errors, continue with regular polling
+  }
+};
+
+// Clean up polling interval on component unmount
+useEffect(() => {
+  return () => {
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+    }
+  };
+}, [pollingInterval]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white py-12 px-4 sm:px-6 lg:px-8">
@@ -297,23 +531,52 @@ const handleGenerate = async () => {
               ></div>
             </div>
             <p className="text-center text-gray-400 mt-2">{progress > 0 ? `${progress}% complete` : "Initializing..."}</p>
+            <p className="text-center text-gray-400 mt-4 text-sm">
+              This process may take up to 20 minutes to complete. Please be patient.
+            </p>
+            
+            {isManualRefreshAvailable && (
+              <div className="mt-6 text-center">
+                <p className="text-amber-400 mb-2">Status check timed out. The process may still be running.</p>
+                <button
+                  type="button"
+                  onClick={handleManualRefresh}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 focus:ring-offset-gray-800"
+                >
+                  Check Status Manually
+                </button>
+              </div>
+            )}
           </section>
         )}
 
         {generatedVideoUrl && !isLoading && (
-          <section id="image-preview-section" className="mb-8 p-6 bg-gray-800 rounded-lg shadow-xl"> 
+          <section id="result-preview-section" className="mb-8 p-6 bg-gray-800 rounded-lg shadow-xl"> 
             <h2 className="text-2xl font-semibold text-blue-300 mb-4 text-center">Your Generated Content is Ready!</h2>
             <div className="bg-black rounded-md overflow-hidden flex justify-center items-center"> 
-              <img 
-                src={generatedVideoUrl} 
-                alt="Generated Output" // Changed alt text
-                className="max-w-full max-h-[70vh] object-contain" 
-              />
+              {/* Display image or video based on content type */}
+              {contentType?.startsWith('image/') ? (
+                <img 
+                  src={generatedVideoUrl} 
+                  alt="Generated Output"
+                  className="max-w-full max-h-[70vh] object-contain" 
+                />
+              ) : contentType?.startsWith('video/') ? (
+                <video 
+                  src={generatedVideoUrl} 
+                  controls
+                  className="max-w-full max-h-[70vh]"
+                />
+              ) : (
+                <div className="text-white p-4">
+                  Content generated. <a href={generatedVideoUrl} className="text-blue-400 underline">Click to view</a>
+                </div>
+              )}
             </div>
             <div className="text-center mt-6">
               <a
                 href={generatedVideoUrl}
-                download="generated_content.out" // Changed download filename to be generic
+                download={`generated_content.${contentType?.split('/')[1] || 'bin'}`}
                 className="inline-flex items-center px-6 py-2 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-gray-800"
               >
                 Download Output
