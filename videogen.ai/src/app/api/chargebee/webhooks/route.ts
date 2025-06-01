@@ -1,20 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import chargebee from 'chargebee-typescript';
-import { headers } from 'next/headers';
+import { getChargebee } from '@/lib/chargebee';
 import prisma from '@/lib/prisma'; // Import Prisma client
-
-chargebee.configure({
-  site: process.env.CHARGEBEE_SITE!,
-  api_key: process.env.CHARGEBEE_API_KEY!,
-});
 
 const WEBHOOK_USERNAME = process.env.CHARGEBEE_WEBHOOK_USERNAME;
 const WEBHOOK_PASSWORD = process.env.CHARGEBEE_WEBHOOK_PASSWORD;
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate Webhook (Basic Auth - already implemented)
-  const headersList = headers();
-  const authorization = headersList.get('authorization');
+  const authorization = request.headers.get('authorization');
   if (WEBHOOK_USERNAME && WEBHOOK_PASSWORD) {
     if (!authorization) {
       return NextResponse.json({ error: 'Webhook authorization required.' }, { status: 401 });

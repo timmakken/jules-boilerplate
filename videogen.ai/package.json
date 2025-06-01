@@ -9,9 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@auth/prisma-adapter": "^2.9.1",
+    "@prisma/client": "^6.8.2",
     "chargebee": "^3.7.0",
-    "chargebee-typescript": "^2.48.0",
     "next": "15.3.2",
+    "next-auth": "^4.24.11",
+    "prisma": "^6.8.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

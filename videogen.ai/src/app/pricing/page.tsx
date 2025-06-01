@@ -31,11 +31,22 @@ export default function PricingPage() {
           throw new Error(`Failed to fetch plans: ${response.statusText}`);
         }
         const data = await response.json();
-        const fetchedPlans = data.plans.map((p: any) => ({
+        
+        // Check if plans array exists and has items
+        if (!data.plans || !Array.isArray(data.plans) || data.plans.length === 0) {
+          console.warn('No plans returned from API:', data);
+          setPlans([]);
+          return;
+        }
+        
+        // Filter out any null or invalid plans before mapping
+        const validPlans = data.plans.filter((p: any) => p && p.id);
+        
+        const fetchedPlans = validPlans.map((p: any) => ({
           id: p.id,
           name: p.name || p.id.replace(/-/g, ' ').replace(/_/g, ' '),
-          price: p.price,
-          currency_code: p.currency_code,
+          price: p.price || 0,
+          currency_code: p.currency_code || 'USD',
         }));
         setPlans(fetchedPlans);
       } catch (err) {
