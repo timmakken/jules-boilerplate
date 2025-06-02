@@ -4,7 +4,7 @@ const Footer = () => {
   const currentYear = new Date().getFullYear();
 
   return (
-    <footer className="bg-gray-800 text-gray-400 py-8 md:py-12 border-t border-gray-700">
+    <footer className="bg-neutral-lightest text-neutral-darker py-8 md:py-12 border-t border-neutral-lighter">
       <div className="container mx-auto px-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-center">
           {/* Copyright */}
@@ -14,29 +14,29 @@ const Footer = () => {
 
           {/* Footer Links */}
           <nav className="flex flex-col md:flex-row justify-center items-center space-y-2 md:space-y-0 md:space-x-6">
-            <Link href="/about" className="hover:text-teal-400 transition-colors duration-300">
+            <Link href="/about" className="hover:text-primary transition-colors duration-300">
               About Us
             </Link>
-            <Link href="/contact" className="hover:text-teal-400 transition-colors duration-300">
+            <Link href="/contact" className="hover:text-primary transition-colors duration-300">
               Contact
             </Link>
-            <Link href="/privacy" className="hover:text-teal-400 transition-colors duration-300">
+            <Link href="/privacy" className="hover:text-primary transition-colors duration-300">
               Privacy Policy
             </Link>
-            <Link href="/terms" className="hover:text-teal-400 transition-colors duration-300">
+            <Link href="/terms" className="hover:text-primary transition-colors duration-300">
               Terms of Service
             </Link>
           </nav>
 
           {/* Social Media Placeholders */}
           <div className="flex justify-center md:justify-end space-x-4">
-            <a href="#" aria-label="Facebook" className="hover:text-teal-400 transition-colors duration-300">
+            <a href="#" aria-label="Facebook" className="hover:text-primary transition-colors duration-300">
               [FB]
             </a>
-            <a href="#" aria-label="Twitter" className="hover:text-teal-400 transition-colors duration-300">
+            <a href="#" aria-label="Twitter" className="hover:text-primary transition-colors duration-300">
               [TW]
             </a>
-            <a href="#" aria-label="LinkedIn" className="hover:text-teal-400 transition-colors duration-300">
+            <a href="#" aria-label="LinkedIn" className="hover:text-primary transition-colors duration-300">
               [LI]
             </a>
             {/* Replace [FB], [TW], [LI] with actual icons or SVG components later */}
