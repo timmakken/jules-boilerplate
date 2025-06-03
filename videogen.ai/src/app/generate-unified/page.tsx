@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, ChangeEvent, useEffect } from 'react';
+import { getPredefinedVoices, PredefinedVoice, generateSpeech, TTSRequest } from '@/lib/ttsService';
+import TTSSection from './tts-section';
 
 const IMAGE_TYPES_ITV = ['image/jpeg', 'image/png', 'image/gif'];
 const MAX_IMAGE_SIZE_ITV = 5 * 1024 * 1024; // 5MB
@@ -23,6 +25,8 @@ export default function GenerateUnifiedPage() {
   const [avatarStyle, setAvatarStyle] = useState<string>('');
   const [ttsText, setTtsText] = useState<string>('');
   const [selectedVoice, setSelectedVoice] = useState<string>('');
+  const [availableVoices, setAvailableVoices] = useState<PredefinedVoice[]>([]);
+  const [ttsAudioUrl, setTtsAudioUrl] = useState<string | null>(null);
   const [videoFilesEdit, setVideoFilesEdit] = useState<File[]>([]);
   const [editingStyle, setEditingStyle] = useState<string>('');
   const [videoFilesEditError, setVideoFilesEditError] = useState<string | undefined>(undefined);
@@ -197,7 +201,6 @@ export default function GenerateUnifiedPage() {
       }
     }
 
-
     setIsLoading(true);
     setGeneratedVideoUrl(null);
     setContentType(null);
@@ -244,8 +247,34 @@ export default function GenerateUnifiedPage() {
       formData.append('script', prompt); // 'prompt' state is script for avatar
       formData.append('avatar_style', avatarStyle);
     } else if (generationMode === 'text-to-speech') {
-      formData.append('tts_text', ttsText);
-      formData.append('selected_voice', selectedVoice);
+      // For TTS, we'll use our direct TTS service instead of ComfyUI
+      try {
+        const request: TTSRequest = {
+          text: ttsText,
+          voice_mode: "predefined" as const, // Use "as const" to ensure TypeScript treats this as a literal
+          predefined_voice_id: selectedVoice,
+          output_format: 'wav',
+        };
+        
+        const audioBlob = await generateSpeech(request);
+        const url = URL.createObjectURL(audioBlob);
+        
+        setGeneratedVideoUrl(url);
+        setContentType('audio/wav');
+        setIsLoading(false);
+        setProgress(100);
+        
+        // Store the URL to clean up later
+        setTtsAudioUrl(url);
+        
+        // Skip the rest of the ComfyUI API call
+        return;
+      } catch (err: any) {
+        setError(err.message || 'Failed to generate speech');
+        setIsLoading(false);
+        setProgress(0);
+        return;
+      }
     } else if (generationMode === 'ai-auto-edit') {
       videoFilesEdit.forEach((file) => { // Appending each file with the same key
         formData.append('video_clips', file);
@@ -406,12 +435,36 @@ export default function GenerateUnifiedPage() {
   };
 
   useEffect(() => {
+    // Fetch available voices when TTS mode is selected
+    if (generationMode === 'text-to-speech') {
+      const fetchVoices = async () => {
+        try {
+          const voices = await getPredefinedVoices();
+          setAvailableVoices(voices);
+          if (voices.length > 0 && !selectedVoice) {
+            // Set default voice if none selected
+            setSelectedVoice(voices[0].filename || voices[0].display_name || '');
+          }
+        } catch (err) {
+          console.error('Failed to fetch voices:', err);
+          setError('Failed to load available voices. Please try again.');
+        }
+      };
+      
+      fetchVoices();
+    }
+    
     return () => {
       if (pollingInterval) {
         clearInterval(pollingInterval);
       }
+      
+      // Clean up audio URL when component unmounts
+      if (ttsAudioUrl) {
+        URL.revokeObjectURL(ttsAudioUrl);
+      }
     };
-  }, [pollingInterval]);
+  }, [pollingInterval, generationMode, selectedVoice, ttsAudioUrl]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white py-12 px-4 sm:px-6 lg:px-8">
@@ -451,7 +504,7 @@ export default function GenerateUnifiedPage() {
           </div>
         </div>
 
-        {/* Conditional Rendering of Forms based on mode will go here */}
+        {/* Conditional Rendering of Forms based on mode */}
         <div>
           {generationMode === 'text-to-video' && (
             /* Text-to-Video Form */
@@ -470,7 +523,7 @@ export default function GenerateUnifiedPage() {
                     rows={4}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
-                    // disabled={isLoading} // Assuming isLoading state will be added later
+                    disabled={isLoading}
                     className="shadow-sm focus:ring-emerald-500 focus:border-emerald-500 block w-full sm:text-sm border-gray-700 bg-gray-700/50 rounded-md text-white p-2.5 placeholder-gray-500"
                     placeholder="e.g., A majestic dragon flying over a fantasy kingdom, cinematic lighting..."
                   />
@@ -484,7 +537,7 @@ export default function GenerateUnifiedPage() {
                     name="art-style-select-ttv"
                     value={artStyle}
                     onChange={(e) => setArtStyle(e.target.value)}
-                    // disabled={isLoading} // Assuming isLoading state will be added later
+                    disabled={isLoading}
                     className="block w-full pl-3 pr-10 py-2.5 text-base border-gray-700 bg-gray-700/50 focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm rounded-md text-white"
                   >
                     <option value="">Select Art Style (Optional)...</option>
@@ -500,6 +553,7 @@ export default function GenerateUnifiedPage() {
               </div>
             </div>
           )}
+          
           {generationMode === 'image-to-video' && (
             /* Image-to-Video Form */
             <div className="p-8 bg-gray-800/70 backdrop-blur-md rounded-xl shadow-2xl border border-gray-700/50">
@@ -517,7 +571,7 @@ export default function GenerateUnifiedPage() {
                     name="image-upload-itv"
                     accept="image/jpeg,image/png,image/gif"
                     onChange={handleImageChangeITV}
-                    // disabled={isLoading} // To be added later
+                    disabled={isLoading}
                     className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-cyan-500 file:text-white hover:file:bg-cyan-600 disabled:opacity-50"
                   />
                   <p className="text-xs text-gray-400 mt-1">Accepted: JPG, PNG, GIF. Max 5MB.</p>
@@ -535,7 +589,7 @@ export default function GenerateUnifiedPage() {
                     rows={3}
                     value={prompt} // Reusing prompt state
                     onChange={(e) => setPrompt(e.target.value)}
-                    // disabled={isLoading}
+                    disabled={isLoading}
                     className="shadow-sm focus:ring-cyan-500 focus:border-cyan-500 block w-full sm:text-sm border-gray-700 bg-gray-700/50 rounded-md text-white p-2.5 placeholder-gray-500"
                     placeholder="e.g., Gentle zoom in, subtle parallax effect, make the clouds move..."
                   />
@@ -550,14 +604,14 @@ export default function GenerateUnifiedPage() {
                     name="art-style-select-itv"
                     value={artStyle} // Reusing artStyle state
                     onChange={(e) => setArtStyle(e.target.value)}
-                    // disabled={isLoading}
+                    disabled={isLoading}
                     className="block w-full pl-3 pr-10 py-2.5 text-base border-gray-700 bg-gray-700/50 focus:outline-none focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm rounded-md text-white"
                   >
                     <option value="">Select Art Style...</option>
                     <option value="cinematic">Cinematic</option>
                     <option value="anime">Anime</option>
                     <option value="fantasy">Fantasy</option>
-                    {/* Add other relevant styles */}
+                     {/* Add other relevant styles */}
                   </select>
                 </div>
               </div>
@@ -681,53 +735,15 @@ export default function GenerateUnifiedPage() {
             </div>
           )}
           {generationMode === 'text-to-speech' && (
-            /* Text-to-Speech (TTS) Form */
-            <div className="p-8 bg-gray-800/70 backdrop-blur-md rounded-xl shadow-2xl border border-gray-700/50">
-              <h3 className="text-2xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-sky-500 mb-8 text-center">
-                Generate Voiceover from Text
-              </h3>
-              <div className="space-y-6">
-                <div>
-                  <label htmlFor="tts-text-input" className="block text-sm font-medium text-gray-300 mb-1">
-                    Text to Synthesize <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    id="tts-text-input"
-                    name="tts-text-input"
-                    rows={5}
-                    value={ttsText}
-                    onChange={(e) => setTtsText(e.target.value)}
-                    // disabled={isLoading}
-                    className="shadow-sm focus:ring-sky-500 focus:border-sky-500 block w-full sm:text-sm border-gray-700 bg-gray-700/50 rounded-md text-white p-2.5 placeholder-gray-500"
-                    placeholder="Enter the text you want to convert to speech..."
-                  />
-                </div>
-                <div>
-                  <label htmlFor="tts-voice-select" className="block text-sm font-medium text-gray-300 mb-1">
-                    Select Voice <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    id="tts-voice-select"
-                    name="tts-voice-select"
-                    value={selectedVoice}
-                    onChange={(e) => setSelectedVoice(e.target.value)}
-                    // disabled={isLoading}
-                    className="block w-full pl-3 pr-10 py-2.5 text-base border-gray-700 bg-gray-700/50 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm rounded-md text-white"
-                  >
-                    <option value="">Select Voice...</option>
-                    <option value="narrator_male_std">Narrator - Male</option>
-                    <option value="narrator_female_std">Narrator - Female</option>
-                    <option value="char_upbeat_std">Character - Upbeat</option>
-                    <option value="char_serious_std">Character - Serious</option>
-                  </select>
-                </div>
-                <div className="pt-4 border-t border-gray-700/50">
-                  <h4 className="text-lg font-medium text-gray-400 mb-2">Future Enhancements:</h4>
-                  <p className="text-sm text-gray-500">- Voice cloning capabilities (with ethical safeguards).</p>
-                  <p className="text-sm text-gray-500">- Controls for speech speed, pitch, and emotion.</p>
-                </div>
-              </div>
-            </div>
+            <TTSSection 
+              ttsText={ttsText}
+              setTtsText={setTtsText}
+              selectedVoice={selectedVoice}
+              setSelectedVoice={setSelectedVoice}
+              availableVoices={availableVoices}
+              isLoading={isLoading}
+              setTtsAudioUrl={setTtsAudioUrl}
+            />
           )}
           {generationMode === 'ai-auto-edit' && (
             /* AI Auto-Edit Form */
