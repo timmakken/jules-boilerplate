@@ -103,6 +103,17 @@ export default function Navbar() {
                 Generate
               </Link>
             )}
+            {status === 'authenticated' && (
+              <Link
+                href="/generate-unified"
+                className={`text-base font-medium ${isActive('/generate-unified')
+                  ? (scrolled ? 'text-secondary' : 'text-white font-bold')
+                  : (scrolled ? 'text-gray-700 hover:text-secondary' : 'text-neutral-lightest hover:text-white')}
+                  transition-colors duration-300 pb-1 ${isActive('/generate-unified') ? 'border-b-2 border-secondary' : ''}`}
+              >
+                Unified Generate
+              </Link>
+            )}
           </nav>
 
           {/* Desktop right section - Auth buttons */}
@@ -218,6 +229,16 @@ export default function Navbar() {
               Generate
             </Link>
           )}
+            {status === 'authenticated' && (
+              <Link
+                href="/generate-unified"
+                className={`block px-3 py-2 rounded-md text-base font-medium ${isActive('/generate-unified')
+                  ? (scrolled ? 'bg-gray-100 text-secondary' : 'bg-primary-darker text-white')
+                  : (scrolled ? 'text-gray-700 hover:bg-gray-100 hover:text-secondary' : 'text-neutral-lightest hover:bg-primary-darker hover:text-white')} transition-colors duration-300`}
+              >
+                Unified Generate
+              </Link>
+            )}
         </div>
         
         {/* Mobile menu auth section */}
