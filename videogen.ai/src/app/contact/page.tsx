@@ -1,18 +1,6 @@
 'use client';
 
 import { useState, FormEvent } from 'react';
-import type { Metadata } from 'next'; // Although Metadata is usually for server components, we can define it here for Next.js to pick up.
-
-// It's better to define metadata in a separate layout.tsx for client components,
-// or handle it through server-side rendering if this page were server-rendered.
-// For this specific setup, Next.js might not pick up this metadata export directly from a 'use client' page.
-// However, for the purpose of this exercise, I'm including it as requested.
-// A more robust solution would involve a server component parent or a layout file.
-export const metadata: Metadata = {
-  title: "Contact Us | Videogen.ai - Get in Touch",
-  description: "Have questions, feedback, or inquiries? Contact the Videogen.ai team through our contact form or find our contact details here. We're happy to help!",
-  keywords: ["contact videogen.ai", "customer support", "technical assistance", "feedback", "AI video generation help"],
-};
 
 interface FormData {
   name: string;

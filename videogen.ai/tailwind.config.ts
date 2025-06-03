@@ -1,19 +1,21 @@
 import type { Config } from 'tailwindcss'
 
-export default {
+const config: Config = {
   content: [
-    './src/app/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/app/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
     extend: {
       colors: {
         primary: {
-          DEFAULT: '#0070f3', // Example: A vibrant blue
+          DEFAULT: '#0070f3', // A vibrant blue
           dark: '#005bb5',
+          darker: '#004a92',
         },
         secondary: {
-          DEFAULT: '#ff4081', // Example: A pink accent
+          DEFAULT: '#ff4081', // A pink accent
           dark: '#c60055',
         },
         neutral: {
@@ -27,8 +29,8 @@ export default {
         foreground: '#111111', // For a light theme text
       },
       fontFamily: {
-        sans: ['Inter', 'sans-serif'], // Example: Inter font
-        heading: ['Lexend', 'sans-serif'], // Example: Lexend for headings
+        sans: ['var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        heading: ['var(--font-lexend)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       animation: {
         fadeInUp: 'fadeInUp 0.7s ease-out forwards',
@@ -42,4 +44,6 @@ export default {
     },
   },
   plugins: [],
-} satisfies Config
+}
+
+export default config

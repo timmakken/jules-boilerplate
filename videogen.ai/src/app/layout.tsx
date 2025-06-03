@@ -5,8 +5,18 @@ import Navbar from "@/components/Navbar"; // Adjust path if necessary
 import Footer from "@/components/Footer"; // Import the Footer component
 import Providers from "./providers"; // Import the new Providers component
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-const lexend = Lexend({ subsets: ["latin"], variable: "--font-lexend" }); // Add Lexend
+// Load fonts with subsets
+const inter = Inter({ 
+  subsets: ["latin"],
+  display: 'swap',
+  variable: '--font-inter'
+});
+
+const lexend = Lexend({ 
+  subsets: ["latin"],
+  display: 'swap',
+  variable: '--font-lexend'
+});
 
 export const metadata: Metadata = {
   title: {
@@ -23,12 +33,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full"> {/* Ensure html takes full height */}
-      <body className={`${inter.variable} ${lexend.variable} font-sans bg-background text-foreground flex flex-col min-h-full`}> {/* Apply Inter and Lexend variables, and default font, bg, text */}
-        <Providers> {/* Wrap Navbar and children with Providers */}
+    <html lang="en" className={`${inter.variable} ${lexend.variable}`}>
+      <body className="bg-background text-foreground flex flex-col min-h-screen">
+        <Providers>
           <Navbar />
-          <main className="flex-grow">{children}</main> {/* Allow main content to grow */}
-          <Footer /> {/* Add the Footer component here */}
+          <main className="flex-grow pt-16 md:pt-20">{children}</main>
+          <Footer />
         </Providers>
       </body>
     </html>
