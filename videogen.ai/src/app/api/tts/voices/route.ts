@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
   try {
-    const response = await fetch('http://localhost:8004/get_predefined_voices');
+    const ttsServerUrl = process.env.TTS_SERVER_URL || 'http://localhost:8004';
+    const response = await fetch(`${ttsServerUrl}/get_predefined_voices`);
     
     if (!response.ok) {
       return NextResponse.json(

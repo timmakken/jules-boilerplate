@@ -3,8 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const ttsServerUrl = process.env.TTS_SERVER_URL || 'http://localhost:8004';
     
-    const ttsResponse = await fetch('http://localhost:8004/tts', {
+    const ttsResponse = await fetch(`${ttsServerUrl}/tts`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

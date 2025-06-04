@@ -83,3 +83,30 @@ export async function getInitialData() {
   
   return await response.json();
 }
+
+export async function getReferenceFiles(): Promise<string[]> {
+  const response = await fetch('/api/tts/reference-files');
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch reference files');
+  }
+  
+  return await response.json();
+}
+
+export async function uploadReferenceFile(file: File): Promise<{ success: boolean, message: string }> {
+  const formData = new FormData();
+  formData.append('files', file);
+  
+  const response = await fetch('/api/tts/upload-reference', {
+    method: 'POST',
+    body: formData,
+  });
+  
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || 'Failed to upload reference file');
+  }
+  
+  return await response.json();
+}

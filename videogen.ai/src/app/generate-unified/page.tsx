@@ -3,6 +3,7 @@
 import React, { useState, ChangeEvent, useEffect } from 'react';
 import { getPredefinedVoices, PredefinedVoice, generateSpeech, TTSRequest } from '@/lib/ttsService';
 import TTSSection from './tts-section';
+import { getReferenceFiles } from '@/lib/ttsService';
 
 const IMAGE_TYPES_ITV = ['image/jpeg', 'image/png', 'image/gif'];
 const MAX_IMAGE_SIZE_ITV = 5 * 1024 * 1024; // 5MB
@@ -40,6 +41,23 @@ export default function GenerateUnifiedPage() {
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [retryCount, setRetryCount] = useState<number>(0);
   const [isManualRefreshAvailable, setIsManualRefreshAvailable] = useState<boolean>(false);
+
+  const [voiceMode, setVoiceMode] = useState<'predefined' | 'clone'>('predefined');
+  const [referenceFiles, setReferenceFiles] = useState<string[]>([]);
+  const [temperature, setTemperature] = useState<number | null>(null);
+  const [exaggeration, setExaggeration] = useState<number | null>(null);
+  const [speedFactor, setSpeedFactor] = useState<number | null>(null);
+
+  // Add a function to refresh reference files
+  const refreshReferenceFiles = async () => {
+    try {
+      const files = await getReferenceFiles();
+      setReferenceFiles(files);
+    } catch (err) {
+      console.error('Failed to fetch reference files:', err);
+      setError('Failed to load reference files. Please try again.');
+    }
+  };
 
   const handleImageChangeITV = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -247,13 +265,18 @@ export default function GenerateUnifiedPage() {
       formData.append('script', prompt); // 'prompt' state is script for avatar
       formData.append('avatar_style', avatarStyle);
     } else if (generationMode === 'text-to-speech') {
-      // For TTS, we'll use our direct TTS service instead of ComfyUI
       try {
         const request: TTSRequest = {
           text: ttsText,
-          voice_mode: "predefined" as const, // Use "as const" to ensure TypeScript treats this as a literal
-          predefined_voice_id: selectedVoice,
+          voice_mode: voiceMode,
+          ...(voiceMode === 'predefined' 
+            ? { predefined_voice_id: selectedVoice } 
+            : { reference_audio_filename: selectedVoice }),
           output_format: 'wav',
+          // Add advanced parameters if provided
+          ...(temperature !== null && { temperature }),
+          ...(exaggeration !== null && { exaggeration }),
+          ...(speedFactor !== null && { speed_factor: speedFactor }),
         };
         
         const audioBlob = await generateSpeech(request);
@@ -434,37 +457,54 @@ export default function GenerateUnifiedPage() {
     }
   };
 
-  useEffect(() => {
-    // Fetch available voices when TTS mode is selected
-    if (generationMode === 'text-to-speech') {
-      const fetchVoices = async () => {
-        try {
-          const voices = await getPredefinedVoices();
-          setAvailableVoices(voices);
-          if (voices.length > 0 && !selectedVoice) {
-            // Set default voice if none selected
-            setSelectedVoice(voices[0].filename || voices[0].display_name || '');
-          }
-        } catch (err) {
-          console.error('Failed to fetch voices:', err);
-          setError('Failed to load available voices. Please try again.');
+// Update the useEffect hook
+useEffect(() => {
+  // Fetch available voices when TTS mode is selected
+  if (generationMode === 'text-to-speech') {
+    const fetchVoices = async () => {
+      try {
+        const voices = await getPredefinedVoices();
+        setAvailableVoices(voices);
+        if (voices.length > 0 && !selectedVoice && voiceMode === 'predefined') {
+          // Set default voice if none selected
+          setSelectedVoice(voices[0].filename || voices[0].display_name || '');
         }
-      };
-      
-      fetchVoices();
-    }
-    
-    return () => {
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
-      
-      // Clean up audio URL when component unmounts
-      if (ttsAudioUrl) {
-        URL.revokeObjectURL(ttsAudioUrl);
+      } catch (err) {
+        console.error('Failed to fetch voices:', err);
+        setError('Failed to load available voices. Please try again.');
       }
     };
-  }, [pollingInterval, generationMode, selectedVoice, ttsAudioUrl]);
+    
+    const fetchReferenceFiles = async () => {
+      try {
+        const files = await getReferenceFiles();
+        setReferenceFiles(files);
+        if (files.length > 0 && !selectedVoice && voiceMode === 'clone') {
+          // Set default reference file if none selected
+          setSelectedVoice(files[0]);
+        }
+      } catch (err) {
+        console.error('Failed to fetch reference files:', err);
+        setError('Failed to load reference files. Please try again.');
+      }
+    };
+    
+    fetchVoices();
+    fetchReferenceFiles();
+  }
+    
+  return () => {
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+    }
+    
+    // Clean up audio URL when component unmounts
+    if (ttsAudioUrl) {
+      URL.revokeObjectURL(ttsAudioUrl);
+    }
+  };
+}, [pollingInterval, generationMode, selectedVoice, ttsAudioUrl, voiceMode]);
+
 
   return (
     <div className="min-h-screen bg-gray-900 text-white py-12 px-4 sm:px-6 lg:px-8">
@@ -741,8 +781,18 @@ export default function GenerateUnifiedPage() {
               selectedVoice={selectedVoice}
               setSelectedVoice={setSelectedVoice}
               availableVoices={availableVoices}
+              referenceFiles={referenceFiles}
+              voiceMode={voiceMode}
+              setVoiceMode={setVoiceMode}
               isLoading={isLoading}
               setTtsAudioUrl={setTtsAudioUrl}
+              temperature={temperature}
+              setTemperature={setTemperature}
+              exaggeration={exaggeration}
+              setExaggeration={setExaggeration}
+              speedFactor={speedFactor}
+              setSpeedFactor={setSpeedFactor}
+              refreshReferenceFiles={refreshReferenceFiles}
             />
           )}
           {generationMode === 'ai-auto-edit' && (
