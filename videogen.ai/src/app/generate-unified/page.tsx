@@ -1,13 +1,17 @@
 'use client';
 
 import React, { useState, ChangeEvent, useEffect } from 'react';
+import { getPredefinedVoices, PredefinedVoice, generateSpeech, TTSRequest } from '@/lib/ttsService';
+import TTSSection from './tts-section';
+import { getReferenceFiles } from '@/lib/ttsService';
 
 const IMAGE_TYPES_ITV = ['image/jpeg', 'image/png', 'image/gif'];
 const MAX_IMAGE_SIZE_ITV = 5 * 1024 * 1024; // 5MB
-const VIDEO_TYPES_VTV = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/avi'];
-const MAX_VIDEO_SIZE_VTV = 50 * 1024 * 1024; // 50MB
+const VIDEO_TYPES_VTV = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/avi']; // Used by VTV and Auto-Edit
+const MAX_VIDEO_SIZE_VTV = 50 * 1024 * 1024; // Used by VTV and Auto-Edit
 const STYLE_SOURCE_TYPES_VTV = ['image/jpeg', 'image/png', 'image/gif', 'video/mp4', 'video/quicktime']; // Style can be image or video
 const MAX_STYLE_SOURCE_SIZE_VTV = 20 * 1024 * 1024; // 20MB for style reference
+const MAX_EDIT_CLIPS = 5; // Max number of clips for auto-editing
 
 export default function GenerateUnifiedPage() {
   const [generationMode, setGenerationMode] = useState<string>('text-to-video'); // Default mode
@@ -19,6 +23,14 @@ export default function GenerateUnifiedPage() {
   const [contentVideoErrorVTV, setContentVideoErrorVTV] = useState<string | undefined>(undefined);
   const [styleSourceFileVTV, setStyleSourceFileVTV] = useState<File | null>(null);
   const [styleSourceErrorVTV, setStyleSourceErrorVTV] = useState<string | undefined>(undefined);
+  const [avatarStyle, setAvatarStyle] = useState<string>('');
+  const [ttsText, setTtsText] = useState<string>('');
+  const [selectedVoice, setSelectedVoice] = useState<string>('');
+  const [availableVoices, setAvailableVoices] = useState<PredefinedVoice[]>([]);
+  const [ttsAudioUrl, setTtsAudioUrl] = useState<string | null>(null);
+  const [videoFilesEdit, setVideoFilesEdit] = useState<File[]>([]);
+  const [editingStyle, setEditingStyle] = useState<string>('');
+  const [videoFilesEditError, setVideoFilesEditError] = useState<string | undefined>(undefined);
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +41,23 @@ export default function GenerateUnifiedPage() {
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [retryCount, setRetryCount] = useState<number>(0);
   const [isManualRefreshAvailable, setIsManualRefreshAvailable] = useState<boolean>(false);
+
+  const [voiceMode, setVoiceMode] = useState<'predefined' | 'clone'>('predefined');
+  const [referenceFiles, setReferenceFiles] = useState<string[]>([]);
+  const [temperature, setTemperature] = useState<number | null>(null);
+  const [exaggeration, setExaggeration] = useState<number | null>(null);
+  const [speedFactor, setSpeedFactor] = useState<number | null>(null);
+
+  // Add a function to refresh reference files
+  const refreshReferenceFiles = async () => {
+    try {
+      const files = await getReferenceFiles();
+      setReferenceFiles(files);
+    } catch (err) {
+      console.error('Failed to fetch reference files:', err);
+      setError('Failed to load reference files. Please try again.');
+    }
+  };
 
   const handleImageChangeITV = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -96,6 +125,36 @@ export default function GenerateUnifiedPage() {
     }
   };
 
+  const handleVideoFilesEditChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files) {
+      const newFilesArray = Array.from(files);
+      if (newFilesArray.length > MAX_EDIT_CLIPS) {
+        setVideoFilesEditError(`You can upload a maximum of ${MAX_EDIT_CLIPS} clips.`);
+        setVideoFilesEdit([]); event.target.value = ''; return;
+      }
+      let errorFound = false;
+      for (const file of newFilesArray) {
+        if (!VIDEO_TYPES_VTV.includes(file.type)) {
+          setVideoFilesEditError('Invalid file type. Please use MP4, MOV, or AVI for all clips.');
+          errorFound = true; break;
+        }
+        if (file.size > MAX_VIDEO_SIZE_VTV) {
+          setVideoFilesEditError(`One or more files are too large. Max ${MAX_VIDEO_SIZE_VTV / (1024 * 1024)}MB per clip.`);
+          errorFound = true; break;
+        }
+      }
+      if (errorFound) {
+        setVideoFilesEdit([]); event.target.value = ''; return;
+      }
+      setVideoFilesEdit(newFilesArray);
+      setVideoFilesEditError(undefined);
+    } else {
+      setVideoFilesEdit([]);
+      setVideoFilesEditError(undefined);
+    }
+  };
+
   const handleGenerate = async () => {
     // Clear previous general errors and mode-specific file errors
     setError(null);
@@ -104,6 +163,8 @@ export default function GenerateUnifiedPage() {
       setContentVideoErrorVTV(undefined);
       setStyleSourceErrorVTV(undefined);
     }
+    if (generationMode === 'ai-auto-edit') setVideoFilesEditError(undefined);
+    // Add any specific error state clearing for ai-avatar or tts if needed in future
 
     // 1. Validation
     if (generationMode === 'text-to-video') {
@@ -128,6 +189,34 @@ export default function GenerateUnifiedPage() {
         if (!styleSourceErrorVTV) setStyleSourceErrorVTV("Style source is required.");
         return;
       }
+    } else if (generationMode === 'ai-avatar') {
+      if (!prompt.trim()) { // 'prompt' state is used for script
+        setError("Please enter a script for the AI Avatar.");
+        return;
+      }
+      if (!avatarStyle) {
+        setError("Please select an avatar style.");
+        return;
+      }
+    } else if (generationMode === 'text-to-speech') {
+      if (!ttsText.trim()) {
+        setError("Please enter text for speech synthesis.");
+        return;
+      }
+      if (!selectedVoice) {
+        setError("Please select a voice.");
+        return;
+      }
+    } else if (generationMode === 'ai-auto-edit') {
+      if (videoFilesEdit.length === 0) {
+        setError("Please upload at least one video clip for editing.");
+        setVideoFilesEditError("At least one video clip is required."); // also set specific error
+        return;
+      }
+      if (!editingStyle) {
+        setError("Please select an editing style.");
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -144,13 +233,25 @@ export default function GenerateUnifiedPage() {
     }
 
     const formData = new FormData();
-    let finalPrompt = prompt;
-    if (artStyle && artStyle.trim() !== "") {
-      finalPrompt = `Art Style: ${artStyle}. User Prompt: ${prompt}`;
+
+    // Modify how mainPromptValue is constructed for the main 'Prompt' field
+    let mainPromptValue = prompt; // Default for TTV, VTV, ITV (if prompt is used there)
+
+    if (generationMode === 'text-to-speech') {
+      mainPromptValue = ''; // TTS uses ttsText primarily
+    } else if (generationMode === 'ai-avatar') {
+      mainPromptValue = prompt; // AI Avatar uses prompt as script
+    } else if (generationMode === 'ai-auto-edit') {
+      mainPromptValue = prompt; // AI Auto-Edit uses prompt for guidance
+    } else if (artStyle && artStyle.trim() !== "") { // For TTV, ITV, VTV if artStyle is present
+      mainPromptValue = `Art Style: ${artStyle}. User Prompt: ${prompt}`;
     }
-    formData.append('Prompt', finalPrompt);
+    // If it's TTV, ITV or VTV without artStyle, mainPromptValue remains the content of 'prompt' state.
+
+    formData.append('Prompt', mainPromptValue);
     formData.append('generationMode', generationMode);
 
+    // Append files and specific mode data
     if (generationMode === 'image-to-video' && imageFileITV) {
       formData.append('reference_image', imageFileITV);
     } else if (generationMode === 'video-to-video') {
@@ -160,6 +261,49 @@ export default function GenerateUnifiedPage() {
       if (styleSourceFileVTV) {
         formData.append('style_source_file', styleSourceFileVTV);
       }
+    } else if (generationMode === 'ai-avatar') {
+      formData.append('script', prompt); // 'prompt' state is script for avatar
+      formData.append('avatar_style', avatarStyle);
+    } else if (generationMode === 'text-to-speech') {
+      try {
+        const request: TTSRequest = {
+          text: ttsText,
+          voice_mode: voiceMode,
+          ...(voiceMode === 'predefined' 
+            ? { predefined_voice_id: selectedVoice } 
+            : { reference_audio_filename: selectedVoice }),
+          output_format: 'wav',
+          // Add advanced parameters if provided
+          ...(temperature !== null && { temperature }),
+          ...(exaggeration !== null && { exaggeration }),
+          ...(speedFactor !== null && { speed_factor: speedFactor }),
+        };
+        
+        const audioBlob = await generateSpeech(request);
+        const url = URL.createObjectURL(audioBlob);
+        
+        setGeneratedVideoUrl(url);
+        setContentType('audio/wav');
+        setIsLoading(false);
+        setProgress(100);
+        
+        // Store the URL to clean up later
+        setTtsAudioUrl(url);
+        
+        // Skip the rest of the ComfyUI API call
+        return;
+      } catch (err: any) {
+        setError(err.message || 'Failed to generate speech');
+        setIsLoading(false);
+        setProgress(0);
+        return;
+      }
+    } else if (generationMode === 'ai-auto-edit') {
+      videoFilesEdit.forEach((file) => { // Appending each file with the same key
+        formData.append('video_clips', file);
+      });
+      formData.append('editing_style', editingStyle);
+      // 'prompt' (guiding prompt) is already in mainPromptValue and appended as 'Prompt'.
     }
 
     let currentProgress = 5;
@@ -313,13 +457,54 @@ export default function GenerateUnifiedPage() {
     }
   };
 
-  useEffect(() => {
-    return () => {
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
+// Update the useEffect hook
+useEffect(() => {
+  // Fetch available voices when TTS mode is selected
+  if (generationMode === 'text-to-speech') {
+    const fetchVoices = async () => {
+      try {
+        const voices = await getPredefinedVoices();
+        setAvailableVoices(voices);
+        if (voices.length > 0 && !selectedVoice && voiceMode === 'predefined') {
+          // Set default voice if none selected
+          setSelectedVoice(voices[0].filename || voices[0].display_name || '');
+        }
+      } catch (err) {
+        console.error('Failed to fetch voices:', err);
+        setError('Failed to load available voices. Please try again.');
       }
     };
-  }, [pollingInterval]);
+    
+    const fetchReferenceFiles = async () => {
+      try {
+        const files = await getReferenceFiles();
+        setReferenceFiles(files);
+        if (files.length > 0 && !selectedVoice && voiceMode === 'clone') {
+          // Set default reference file if none selected
+          setSelectedVoice(files[0]);
+        }
+      } catch (err) {
+        console.error('Failed to fetch reference files:', err);
+        setError('Failed to load reference files. Please try again.');
+      }
+    };
+    
+    fetchVoices();
+    fetchReferenceFiles();
+  }
+    
+  return () => {
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+    }
+    
+    // Clean up audio URL when component unmounts
+    if (ttsAudioUrl) {
+      URL.revokeObjectURL(ttsAudioUrl);
+    }
+  };
+}, [pollingInterval, generationMode, selectedVoice, ttsAudioUrl, voiceMode]);
+
 
   return (
     <div className="min-h-screen bg-gray-900 text-white py-12 px-4 sm:px-6 lg:px-8">
@@ -338,12 +523,12 @@ export default function GenerateUnifiedPage() {
           <h2 className="text-3xl font-semibold text-center text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-blue-600 mb-8">
             Choose Your Creative Path
           </h2>
-          <div className="flex justify-center bg-gray-800/50 backdrop-blur-sm p-2 rounded-xl shadow-xl border border-gray-700/50 max-w-2xl mx-auto">
-            {['text-to-video', 'image-to-video', 'video-to-video'].map((mode) => (
+          <div className="flex flex-wrap justify-center bg-gray-800/50 backdrop-blur-sm p-2 rounded-xl shadow-xl border border-gray-700/50 max-w-4xl mx-auto">
+            {['text-to-video', 'image-to-video', 'video-to-video', 'ai-avatar', 'text-to-speech', 'ai-auto-edit'].map((mode) => (
               <button
                 key={mode}
                 onClick={() => setGenerationMode(mode)}
-                className={`w-1/3 py-4 px-2 text-center font-medium text-sm sm:text-base rounded-lg transition-all duration-300 ease-in-out focus:outline-none
+                className={`flex-grow basis-1/3 sm:basis-auto min-w-[120px] m-1 px-1 py-3 sm:py-3 sm:px-2 text-center font-medium text-xs sm:text-sm rounded-lg transition-all duration-300 ease-in-out focus:outline-none
                             ${generationMode === mode
                               ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-2xl scale-105 ring-2 ring-sky-400/70'
                               : 'bg-transparent text-gray-400 hover:text-sky-300 hover:bg-gray-700/50'}`}
@@ -351,12 +536,15 @@ export default function GenerateUnifiedPage() {
                 {mode === 'text-to-video' && 'Text to Video'}
                 {mode === 'image-to-video' && 'Image to Video'}
                 {mode === 'video-to-video' && 'Video to Video'}
+                {mode === 'ai-avatar' && 'AI Avatar'}
+                {mode === 'text-to-speech' && 'Text-to-Speech'}
+                {mode === 'ai-auto-edit' && 'AI Auto-Edit'}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Conditional Rendering of Forms based on mode will go here */}
+        {/* Conditional Rendering of Forms based on mode */}
         <div>
           {generationMode === 'text-to-video' && (
             /* Text-to-Video Form */
@@ -375,7 +563,7 @@ export default function GenerateUnifiedPage() {
                     rows={4}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
-                    // disabled={isLoading} // Assuming isLoading state will be added later
+                    disabled={isLoading}
                     className="shadow-sm focus:ring-emerald-500 focus:border-emerald-500 block w-full sm:text-sm border-gray-700 bg-gray-700/50 rounded-md text-white p-2.5 placeholder-gray-500"
                     placeholder="e.g., A majestic dragon flying over a fantasy kingdom, cinematic lighting..."
                   />
@@ -389,7 +577,7 @@ export default function GenerateUnifiedPage() {
                     name="art-style-select-ttv"
                     value={artStyle}
                     onChange={(e) => setArtStyle(e.target.value)}
-                    // disabled={isLoading} // Assuming isLoading state will be added later
+                    disabled={isLoading}
                     className="block w-full pl-3 pr-10 py-2.5 text-base border-gray-700 bg-gray-700/50 focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm rounded-md text-white"
                   >
                     <option value="">Select Art Style (Optional)...</option>
@@ -405,6 +593,7 @@ export default function GenerateUnifiedPage() {
               </div>
             </div>
           )}
+          
           {generationMode === 'image-to-video' && (
             /* Image-to-Video Form */
             <div className="p-8 bg-gray-800/70 backdrop-blur-md rounded-xl shadow-2xl border border-gray-700/50">
@@ -422,7 +611,7 @@ export default function GenerateUnifiedPage() {
                     name="image-upload-itv"
                     accept="image/jpeg,image/png,image/gif"
                     onChange={handleImageChangeITV}
-                    // disabled={isLoading} // To be added later
+                    disabled={isLoading}
                     className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-cyan-500 file:text-white hover:file:bg-cyan-600 disabled:opacity-50"
                   />
                   <p className="text-xs text-gray-400 mt-1">Accepted: JPG, PNG, GIF. Max 5MB.</p>
@@ -440,7 +629,7 @@ export default function GenerateUnifiedPage() {
                     rows={3}
                     value={prompt} // Reusing prompt state
                     onChange={(e) => setPrompt(e.target.value)}
-                    // disabled={isLoading}
+                    disabled={isLoading}
                     className="shadow-sm focus:ring-cyan-500 focus:border-cyan-500 block w-full sm:text-sm border-gray-700 bg-gray-700/50 rounded-md text-white p-2.5 placeholder-gray-500"
                     placeholder="e.g., Gentle zoom in, subtle parallax effect, make the clouds move..."
                   />
@@ -455,14 +644,14 @@ export default function GenerateUnifiedPage() {
                     name="art-style-select-itv"
                     value={artStyle} // Reusing artStyle state
                     onChange={(e) => setArtStyle(e.target.value)}
-                    // disabled={isLoading}
+                    disabled={isLoading}
                     className="block w-full pl-3 pr-10 py-2.5 text-base border-gray-700 bg-gray-700/50 focus:outline-none focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm rounded-md text-white"
                   >
                     <option value="">Select Art Style...</option>
                     <option value="cinematic">Cinematic</option>
                     <option value="anime">Anime</option>
                     <option value="fantasy">Fantasy</option>
-                    {/* Add other relevant styles */}
+                     {/* Add other relevant styles */}
                   </select>
                 </div>
               </div>
@@ -527,6 +716,148 @@ export default function GenerateUnifiedPage() {
                     // disabled={isLoading}
                     className="shadow-sm focus:ring-red-500 focus:border-red-500 block w-full sm:text-sm border-gray-700 bg-gray-700/50 rounded-md text-white p-2.5 placeholder-gray-500"
                     placeholder="e.g., Make it look like a Van Gogh painting, apply a cyberpunk neon glow..."
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          {generationMode === 'ai-avatar' && (
+            /* AI Avatar Form */
+            <div className="p-8 bg-gray-800/70 backdrop-blur-md rounded-xl shadow-2xl border border-gray-700/50">
+              <h3 className="text-2xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500 mb-8 text-center">
+                Create Your AI Avatar
+              </h3>
+              <div className="space-y-6">
+                <div>
+                  <label htmlFor="script-input-avatar" className="block text-sm font-medium text-gray-300 mb-1">
+                    Script for Avatar <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    id="script-input-avatar"
+                    name="script-input-avatar"
+                    rows={4}
+                    value={prompt} // Reusing prompt state for the script
+                    onChange={(e) => setPrompt(e.target.value)}
+                    // disabled={isLoading}
+                    className="shadow-sm focus:ring-purple-500 focus:border-purple-500 block w-full sm:text-sm border-gray-700 bg-gray-700/50 rounded-md text-white p-2.5 placeholder-gray-500"
+                    placeholder="Enter the text your avatar will speak..."
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="avatar-style-select" className="block text-sm font-medium text-gray-300 mb-1">
+                    Avatar Style <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    id="avatar-style-select"
+                    name="avatar-style-select"
+                    value={avatarStyle}
+                    onChange={(e) => setAvatarStyle(e.target.value)}
+                    // disabled={isLoading}
+                    className="block w-full pl-3 pr-10 py-2.5 text-base border-gray-700 bg-gray-700/50 focus:outline-none focus:ring-purple-500 focus:border-purple-500 sm:text-sm rounded-md text-white"
+                  >
+                    <option value="">Select Avatar Style...</option>
+                    <option value="realistic_male_01">Realistic Male 1</option>
+                    <option value="realistic_female_01">Realistic Female 1</option>
+                    <option value="animated_char_a">Animated Character A</option>
+                    <option value="animated_char_b">Animated Character B</option>
+                    {/* Add more styles as they become available */}
+                  </select>
+                </div>
+
+                <div className="pt-4 border-t border-gray-700/50">
+                  <h4 className="text-lg font-medium text-gray-400 mb-2">Future Enhancements:</h4>
+                  <p className="text-sm text-gray-500">- Custom audio upload for voice and lip-sync.</p>
+                  <p className="text-sm text-gray-500">- Background selection options.</p>
+                  <p className="text-sm text-gray-500">- Advanced animation controls.</p>
+                </div>
+              </div>
+            </div>
+          )}
+          {generationMode === 'text-to-speech' && (
+            <TTSSection 
+              ttsText={ttsText}
+              setTtsText={setTtsText}
+              selectedVoice={selectedVoice}
+              setSelectedVoice={setSelectedVoice}
+              availableVoices={availableVoices}
+              referenceFiles={referenceFiles}
+              voiceMode={voiceMode}
+              setVoiceMode={setVoiceMode}
+              isLoading={isLoading}
+              setTtsAudioUrl={setTtsAudioUrl}
+              temperature={temperature}
+              setTemperature={setTemperature}
+              exaggeration={exaggeration}
+              setExaggeration={setExaggeration}
+              speedFactor={speedFactor}
+              setSpeedFactor={setSpeedFactor}
+              refreshReferenceFiles={refreshReferenceFiles}
+            />
+          )}
+          {generationMode === 'ai-auto-edit' && (
+            /* AI Auto-Edit Form */
+            <div className="p-8 bg-gray-800/70 backdrop-blur-md rounded-xl shadow-2xl border border-gray-700/50">
+              <h3 className="text-2xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500 mb-8 text-center">
+                Automated Video Editing
+              </h3>
+              <div className="space-y-6">
+                <div>
+                  <label htmlFor="video-clips-upload" className="block text-sm font-medium text-gray-300 mb-1">
+                    Upload Video Clips (Max {MAX_EDIT_CLIPS}) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="file"
+                    id="video-clips-upload"
+                    name="video-clips-upload"
+                    multiple
+                    accept="video/mp4,video/quicktime,video/x-msvideo,video/avi"
+                    onChange={handleVideoFilesEditChange}
+                    // disabled={isLoading}
+                    className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-orange-500 file:text-white hover:file:bg-orange-600 disabled:opacity-50"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">MP4, MOV, AVI. Max {MAX_VIDEO_SIZE_VTV / (1024 * 1024)}MB per clip.</p>
+                  {videoFilesEditError && <p className="text-xs text-red-400 mt-1">{videoFilesEditError}</p>}
+                  {videoFilesEdit.length > 0 && (
+                    <div className="mt-2 text-xs text-green-400">
+                      Selected {videoFilesEdit.length} clip(s):
+                      <ul className="list-disc list-inside">
+                        {videoFilesEdit.map(f => <li key={f.name}>{f.name} ({Math.round(f.size / 1024)}KB)</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label htmlFor="editing-style-select" className="block text-sm font-medium text-gray-300 mb-1">
+                    Editing Style <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    id="editing-style-select"
+                    name="editing-style-select"
+                    value={editingStyle}
+                    onChange={(e) => setEditingStyle(e.target.value)}
+                    // disabled={isLoading}
+                    className="block w-full pl-3 pr-10 py-2.5 text-base border-gray-700 bg-gray-700/50 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md text-white"
+                  >
+                    <option value="">Select Editing Style...</option>
+                    <option value="quick_montage">Quick Montage (fast cuts, music)</option>
+                    <option value="simple_cuts_transitions">Simple Cuts & Transitions</option>
+                    <option value="story_highlight">Story Highlight (slower pace, focus on narrative)</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="prompt-input-autoedit" className="block text-sm font-medium text-gray-300 mb-1">
+                    Guiding Prompt (Optional)
+                  </label>
+                  <textarea
+                    id="prompt-input-autoedit"
+                    name="prompt-input-autoedit"
+                    rows={3}
+                    value={prompt} // Reusing prompt state
+                    onChange={(e) => setPrompt(e.target.value)}
+                    // disabled={isLoading}
+                    className="shadow-sm focus:ring-orange-500 focus:border-orange-500 block w-full sm:text-sm border-gray-700 bg-gray-700/50 rounded-md text-white p-2.5 placeholder-gray-500"
+                    placeholder="e.g., Focus on action scenes, create an upbeat vibe, use X style of music..."
                   />
                 </div>
               </div>
