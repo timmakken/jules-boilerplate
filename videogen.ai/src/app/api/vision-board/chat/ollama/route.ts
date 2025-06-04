@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // Make sure to set OLLAMA_API_BASE_URL in your .env.local file
 // e.g., OLLAMA_API_BASE_URL="http://localhost:11434"
 const OLLAMA_API_BASE_URL = process.env.OLLAMA_API_BASE_URL;
-const DEFAULT_OLLAMA_MODEL = 'llama2'; // A common default, user might have others
+const DEFAULT_OLLAMA_MODEL = 'qwen3:14b'; // A common default, user might have others
 
 export async function POST(req: NextRequest) {
   if (!OLLAMA_API_BASE_URL) {

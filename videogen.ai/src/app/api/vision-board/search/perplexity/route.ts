@@ -8,7 +8,7 @@ const PERPLEXITY_API_URL = 'https://api.perplexity.ai/chat/completions';
 // See Perplexity documentation for available models with internet access.
 // 'pplx-7b-online' was an example, but it's not a chat completion model.
 // Using 'sonar-small-online' or 'sonar-medium-online' for search-enabled chat.
-const PERPLEXITY_ONLINE_MODEL = 'sonar-medium-online';
+const PERPLEXITY_ONLINE_MODEL = 'sonar';
 
 export async function POST(req: NextRequest) {
   if (!PERPLEXITY_API_KEY) {

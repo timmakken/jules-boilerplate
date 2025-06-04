@@ -6,7 +6,7 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 // You can specify a default model or make it configurable
-const DEFAULT_MODEL = 'mistralai/mistral-7b-instruct';
+const DEFAULT_MODEL = 'deepseek/deepseek-r1-0528:free';
 
 export async function POST(req: NextRequest) {
   if (!OPENROUTER_API_KEY) {
