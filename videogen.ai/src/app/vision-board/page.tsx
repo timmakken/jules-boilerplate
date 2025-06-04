@@ -19,11 +19,11 @@ export default function VisionBoardPage() {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [boardItems, setBoardItems] = useState<BoardItemType[]>([
     // Initial example items (optional)
-    { id: 'initial-image-1', type: 'image', src: 'https://via.placeholder.com/300x200.png?text=Sample+Image', alt: 'A placeholder image' },
     { id: 'initial-text-1', type: 'text', content: 'Welcome to your dynamic vision board! Try asking the AI to find something, like "search for inspirational quotes".' },
   ]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingBoard, setIsLoadingBoard] = useState(false); // For board updates
+  const [isFullWidthView, setIsFullWidthView] = useState(false); // New state
 
   useEffect(() => {
     // Keep initial AI welcome message or fetch initial state if needed
@@ -154,30 +154,33 @@ export default function VisionBoardPage() {
           if (data.reply) {
             let aiResponseText = data.reply;
 
-            // Check if the user's original message contained the trigger,
-            // implying they want THIS AI's response on the board.
+            // Display the AI's response in chat normally *before* processing for board
+            addAiMessage(aiResponseText, 'ai-chat-reply');
+
+            // Check if the user's original message contained the trigger
             if (text.toLowerCase().includes(ADD_TO_BOARD_TRIGGER.toLowerCase())) {
-              // The AI's response (aiResponseText) is what we want to add to the board.
-              // No need to look for the trigger in aiResponseText itself here,
-              // as the user's intent was to add the AI's *current* response.
-              const textForBoard = aiResponseText.trim(); // Use the whole AI response
+              const cleanedAiResponseText = aiResponseText.trim();
+              const imageUrls = extractImageUrls(cleanedAiResponseText);
 
-              if (textForBoard) {
-                  addAiMessage(`Adding my response to the board: "${textForBoard.substring(0, 50)}..."`, 'ai-board-add-signal');
+              if (imageUrls.length > 0) {
+                addAiMessage(`Found images in AI response to add to the board.`, 'ai-board-image-signal');
+                imageUrls.forEach((url, index) => {
                   addBoardItem({
-                      id: 'ai-text-' + String(Date.now()),
-                      type: 'text',
-                      content: textForBoard,
+                    id: 'ai-image-' + String(Date.now()) + '-' + index,
+                    type: 'image',
+                    src: url,
+                    alt: `AI generated image ${index + 1}`,
                   });
+                });
+              } else if (cleanedAiResponseText) { // Only add text if there's actual text and no images
+                addAiMessage(`Adding AI text response to the board: "${cleanedAiResponseText.substring(0, 50)}..."`, 'ai-board-text-signal');
+                addBoardItem({
+                  id: 'ai-text-' + String(Date.now()),
+                  type: 'text',
+                  content: cleanedAiResponseText,
+                });
               }
-              // Display the AI's response in chat normally.
-              addAiMessage(aiResponseText, 'ai-chat-reply');
-
-            } else {
-              // If user did not ask to add to board, just display chat message
-              addAiMessage(aiResponseText, 'ai-chat-reply');
             }
-
           } else {
             throw new Error('Unexpected response structure from AI chat.');
           }
@@ -191,14 +194,26 @@ export default function VisionBoardPage() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white py-12 px-4 sm:px-6 lg:px-8">
-      <div className="container mx-auto max-w-7xl">
-        <header className="text-center mb-12">
+      {/* Apply conditional styling to this container */}
+      <div className={`container mx-auto ${isFullWidthView ? 'w-full' : 'max-w-7xl'}`}>
+        <header className="text-center mb-6"> {/* Reduced mb-12 to mb-6 to make space for button */}
           <h1 className="text-4xl font-bold text-purple-400">AI Vision Board</h1>
           <p className="text-xl text-gray-300 mt-2">
             Craft your digital creations with the power of AI.
           </p>
         </header>
 
+        {/* Add Toggle Button */}
+        <div className="text-center mb-6"> {/* New div for button centering and margin */}
+          <button
+            onClick={() => setIsFullWidthView(!isFullWidthView)}
+            className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition-colors duration-150"
+          >
+            {isFullWidthView ? 'Exit Full Width' : 'Go Full Width'}
+          </button>
+        </div>
+
+        {/* The rest of the layout (grid, etc.) remains inside this conditionally styled container */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 bg-gray-800 p-6 rounded-lg shadow-xl">
             <div className="flex justify-between items-center mb-6">
